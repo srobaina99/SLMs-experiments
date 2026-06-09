@@ -1,0 +1,154 @@
+"""Generate → format → evaluate → record pipeline."""
+
+from typing import Any, Dict, Optional, Protocol, runtime_checkable
+
+from slm_experiments.core.config import ExperimentConfig
+from slm_experiments.core.result import ExperimentResult
+from slm_experiments.evaluation.formatter import ResponseFormatter
+from slm_experiments.evaluation.metrics import TextEvaluator
+
+
+@runtime_checkable
+class ModelWrapper(Protocol):
+    """Minimal model interface for the experiment pipeline."""
+
+    def generate(self, prompt: str, config: ExperimentConfig) -> Dict[str, Any]:
+        """Return at least response, response_time_seconds, generation_successful."""
+        ...
+
+
+@runtime_checkable
+class BeamModelWrapper(Protocol):
+    """Model interface for beam search experiments."""
+
+    def generate_beam(
+        self,
+        prompt: str,
+        config: ExperimentConfig,
+        beam_width: int = 4,
+        selection_method: str = "a1_ratio",
+    ) -> Dict[str, Any]:
+        """Return response, beam metadata, response_time_seconds, generation_successful."""
+        ...
+
+
+class ExperimentPipeline:
+    """Single-observation pipeline: generate, format, evaluate, record."""
+
+    def __init__(
+        self,
+        text_evaluator: Optional[TextEvaluator] = None,
+        formatter: Optional[ResponseFormatter] = None,
+    ):
+        self.text_evaluator = text_evaluator or TextEvaluator()
+        self.formatter = formatter or ResponseFormatter()
+
+    def run(
+        self,
+        prompt: str,
+        config: ExperimentConfig,
+        model: ModelWrapper,
+        experiment_name: Optional[str] = None,
+    ) -> ExperimentResult:
+        """Execute one prompt through the full pipeline."""
+        name = experiment_name or config.experiment_name
+        response_data = model.generate(prompt, config)
+
+        raw_response = response_data.get("response") or ""
+        response_time = float(response_data.get("response_time_seconds", 0.0))
+        model_success = bool(response_data.get("generation_successful", False))
+
+        cleaned = self.formatter.clean_response_for_evaluation(raw_response)
+        is_successful = model_success and bool(cleaned.strip())
+
+        if is_successful:
+            text_metrics = self.text_evaluator.evaluate_text_comprehensive(cleaned)
+            return ExperimentResult.create_from_response(
+                prompt=prompt,
+                response=raw_response,
+                config=config,
+                response_time=response_time,
+                text_metrics=text_metrics,
+                experiment_name=name,
+                cleaned_response=cleaned,
+                generation_successful=True,
+            )
+
+        empty_metrics = self.text_evaluator.evaluate_text_comprehensive("")
+        return ExperimentResult.create_from_response(
+            prompt=prompt,
+            response=raw_response,
+            config=config,
+            response_time=response_time,
+            text_metrics=empty_metrics,
+            experiment_name=name,
+            cleaned_response=cleaned,
+            generation_successful=False,
+        )
+
+    def run_beam(
+        self,
+        prompt: str,
+        config: ExperimentConfig,
+        model: BeamModelWrapper,
+        beam_width: int,
+        experiment_name: Optional[str] = None,
+        selection_method: str = "a1_ratio",
+    ) -> ExperimentResult:
+        """Execute one prompt through beam search, format, evaluate, record."""
+        name = experiment_name or config.experiment_name
+        response_data = model.generate_beam(
+            prompt,
+            config,
+            beam_width=beam_width,
+            selection_method=selection_method,
+        )
+
+        raw_response = response_data.get("response") or ""
+        response_time = float(response_data.get("response_time_seconds", 0.0))
+        model_success = bool(response_data.get("generation_successful", False))
+
+        cleaned = self.formatter.clean_response_for_evaluation(raw_response)
+        is_successful = model_success and bool(cleaned.strip())
+
+        beam_kwargs = {
+            "beam_selection_method": response_data.get(
+                "beam_selection_method", selection_method
+            ),
+            "beam_a1_ratio": float(response_data.get("beam_a1_ratio", 0.0)),
+            "beam_a1_count": int(response_data.get("beam_a1_count", 0)),
+            "beam_content_word_count": int(
+                response_data.get("beam_content_word_count", 0)
+            ),
+            "beam_cumulative_logprob": float(
+                response_data.get("beam_cumulative_logprob", 0.0)
+            ),
+            "beam_width": int(response_data.get("beam_width", beam_width)),
+        }
+
+        if is_successful:
+            text_metrics = self.text_evaluator.evaluate_text_comprehensive(cleaned)
+            return ExperimentResult.create_from_beam_response(
+                prompt=prompt,
+                response=raw_response,
+                config=config,
+                response_time=response_time,
+                text_metrics=text_metrics,
+                experiment_name=name,
+                cleaned_response=cleaned,
+                generation_successful=True,
+                **beam_kwargs,
+            )
+
+        empty_metrics = self.text_evaluator.evaluate_text_comprehensive("")
+        return ExperimentResult.create_from_beam_response(
+            prompt=prompt,
+            response=raw_response,
+            config=config,
+            response_time=response_time,
+            text_metrics=empty_metrics,
+            experiment_name=name,
+            cleaned_response=cleaned,
+            generation_successful=False,
+            **beam_kwargs,
+        )

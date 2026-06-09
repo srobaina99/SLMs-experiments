@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# Models (large GGUF files — place manually in models/gguf/)
+models/gguf/*.gguf
+
+# Experiment results
+results/runs/*/
+!results/runs/.gitkeep
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/

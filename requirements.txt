@@ -1,0 +1,7 @@
+llama-cpp-python>=0.2.0   # inference
+textstat>=0.7.3           # FK, Gunning Fog, Spache
+pandas>=1.5.0             # CSV export
+nltk>=3.8                 # content-word detection (beam A1-ratio)
+tqdm>=4.65                # progress bars
+matplotlib>=3.5.0         # plot command
+seaborn>=0.12.0           # plot command
