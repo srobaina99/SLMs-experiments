@@ -61,12 +61,29 @@ Every run writes a self-contained bundle to `results/runs/{run_id}/`:
 
 Run ID format: `{YYYYMMDD_HHMMSS}_{phase}_{experiment}`
 
+## ClusterUY (HPC)
+
+Run Phase 2 sweeps on Uruguay's national cluster via Singularity (not Docker on-cluster):
+
+```bash
+# On cluster login node
+cd ~/SLMs-experiments
+sbatch scripts/clusteruy/smoke_test.sh          # quick Phi3 check
+sbatch scripts/clusteruy/run_phase2_weights.sh  # full sweep
+```
+
+Full workflow (SSH, image pull, results download): [docs/clusteruy.md](docs/clusteruy.md)
+
+Dockerfile lives in the sibling thesis repo:
+`../SLMs-master-thesis/Tesis/Codigo/scripts/clusteruy/Dockerfile`
+
 ## Documentation
 
 | Document | Purpose |
 |----------|---------|
 | [AGENT.md](AGENT.md) | Agent entry point — structure, CLI, rules |
 | [ExperimentDesign.md](ExperimentDesign.md) | Formal experiment specification |
+| [docs/clusteruy.md](docs/clusteruy.md) | ClusterUY SSH, Singularity, batch jobs |
 | [docs/metrics.md](docs/metrics.md) | Readability metrics and A1 thresholds |
 | [docs/models.md](docs/models.md) | GGUF files, chat templates, GPU setup |
 | [docs/interventions.md](docs/interventions.md) | Weighting, prompting, beam mechanics |

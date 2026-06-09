@@ -14,6 +14,7 @@ Two research phases, one shared pipeline, run-centric results.
 | [docs/metrics.md](docs/metrics.md) | Readability metrics, A1 thresholds | Working on `evaluation/` |
 | [docs/models.md](docs/models.md) | GGUF files, templates, GPU setup | Adding/fixing model wrappers |
 | [docs/interventions.md](docs/interventions.md) | Weighting, prompting, beam mechanics | Changing intervention logic |
+| [docs/clusteruy.md](docs/clusteruy.md) | ClusterUY SSH, Singularity, Phase 2 batch jobs | Running experiments on the cluster |
 | [README.md](README.md) | Human setup quickstart | Environment issues |
 
 ## 3. Research Phases
@@ -34,6 +35,7 @@ SLMs-experiments/
 ├── AGENT.md                  # This file — agent entry point
 ├── README.md                 # Human quickstart
 ├── ExperimentDesign.md       # Formal experiment specification
+├── scripts/clusteruy/        # SLURM batch scripts (smoke test + Phase 2 sweeps)
 ├── requirements.txt          # Runtime dependencies (7 packages)
 ├── requirements-dev.txt      # pytest
 ├── pytest.ini

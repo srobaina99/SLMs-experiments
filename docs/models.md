@@ -77,12 +77,18 @@ Phi-3 template: `<|system|>`, `<|user|>`, `<|assistant|>` tokens.
 
 ### Phi-3 GPU Requirement
 
-Phi-3 at 3.8B parameters generates ~0.1 words/sec on CPU (~16 min for 100 words). GPU offloading via Metal (`n_gpu_layers=-1`) achieves ~18 words/sec. **Phi-3 experiments require Apple Silicon with Metal support.**
+Phi-3 at 3.8B parameters generates ~0.1 words/sec on CPU (~16 min for 100 words).
+GPU offloading (`n_gpu_layers=-1`) is required for practical runtimes.
+
+| Environment | Backend | Speed | Notes |
+|-------------|---------|-------|-------|
+| Local Mac (M1/M2) | Metal (CUDA build with Metal) | ~18 words/sec | Default for local development |
+| ClusterUY | CUDA (Tesla P100) | ~18 words/sec | Verified smoke test 2026-06-09 |
 
 Empirical results on M2 Mac:
 
-| Metric | CPU | GPU | Improvement |
-|--------|-----|-----|-------------|
+| Metric | CPU | GPU (Metal) | Improvement |
+|--------|-----|-------------|-------------|
 | Load time | 2.4s | 4.4s | Slower (one-time) |
 | Generation (10 tokens) | 36.8s | 0.5s | **73× faster** |
 
@@ -119,4 +125,6 @@ Use Q4_0 quantization for models < 1 GB; Q4 for Phi-3.
 
 **Minimum (CPU models):** Apple M1/M2 or equivalent, 8 GB RAM, 2 GB storage
 
-**GPU (Phi-3):** Apple M1/M2 with Metal, 16 GB unified memory, ~3 GB GPU memory available
+**GPU (Phi-3, local):** Apple M1/M2 with Metal, 16 GB unified memory, ~3 GB GPU memory available
+
+**GPU (Phi-3, ClusterUY):** Tesla P100 (16 GB VRAM) via Singularity + CUDA. See [clusteruy.md](clusteruy.md).
