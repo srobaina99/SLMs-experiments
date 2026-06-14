@@ -70,7 +70,7 @@ class BeamSearchGenerator:
                         BeamCandidate(
                             token_ids=token_ids,
                             cumulative_log_prob=cumulative_log_prob,
-                            sequence_text=prompt + response_text,
+                            sequence_text=response_text,
                         )
                     )
             except Exception:
@@ -81,7 +81,7 @@ class BeamSearchGenerator:
                 BeamCandidate(
                     token_ids=[],
                     cumulative_log_prob=0.0,
-                    sequence_text=prompt,
+                    sequence_text="",
                 )
             )
 

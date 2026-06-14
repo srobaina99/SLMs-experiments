@@ -27,6 +27,27 @@ class MockSuccessModel:
         }
 
 
+class MockBeamModelWrapper:
+    def generate_beam(
+        self,
+        prompt: str,
+        config: ExperimentConfig,
+        beam_width: int = 4,
+        selection_method: str = "a1_ratio",
+    ) -> dict:
+        return {
+            "response": SIMPLE_RESPONSE,
+            "response_time_seconds": 2.0,
+            "generation_successful": True,
+            "beam_selection_method": selection_method,
+            "beam_a1_ratio": 0.75,
+            "beam_a1_count": 3,
+            "beam_content_word_count": 6,
+            "beam_cumulative_logprob": -1.2,
+            "beam_width": beam_width,
+        }
+
+
 class MockFailureModel:
     def generate(self, prompt: str, config: ExperimentConfig) -> dict:
         return {
@@ -131,6 +152,83 @@ class TestRunStore:
         expected_wc = successful_only[0].word_count
         assert abs(wc_mean - expected_wc) < 0.01
         assert abs(fk_mean - successful_only[0].flesch_kincaid_grade) < 0.01
+
+    def test_summary_includes_sweep_buckets_for_phase2(self, tmp_path: Path):
+        pipeline = ExperimentPipeline()
+
+        def _result(weight: float, fk: float) -> ExperimentResult:
+            config = ExperimentConfig(
+                model_name="Qwen3",
+                config_weighting=True,
+                config_prompting=True,
+                weight_factor=weight,
+                prompt_id="p01",
+            )
+            result = pipeline.run("What is a friend?", config, MockSuccessModel())
+            result.flesch_kincaid_grade = fk
+            return result
+
+        results = [_result(1.0, 4.0), _result(1.5, 3.0), _result(1.5, 2.5)]
+        summary = compute_summary_stats(results, experiment="weights")
+
+        assert summary["metadata"]["sweep_dimension"] == "weight_factor"
+        assert summary["metadata"]["sweep_values"] == ["1", "1.5"]
+        assert summary["by_weight_factor"]["1"]["count"] == 1
+        assert summary["by_weight_factor"]["1.5"]["count"] == 2
+        assert summary["by_weight_factor"]["1.5"]["flesch_kincaid_grade"]["mean"] == 2.75
+        assert list(summary["by_config"].keys()) == ["both"]
+
+    def test_summary_includes_prompting_shot_buckets(self, tmp_path: Path):
+        pipeline = ExperimentPipeline()
+
+        def _result(num_shots: int, fk: float) -> ExperimentResult:
+            config = ExperimentConfig(
+                model_name="Qwen3",
+                config_weighting=False,
+                config_prompting=True,
+                num_shots=num_shots,
+                prompt_id="p01",
+            )
+            result = pipeline.run("What is a friend?", config, MockSuccessModel())
+            result.flesch_kincaid_grade = fk
+            return result
+
+        results = [_result(0, 4.0), _result(1, 3.5), _result(3, 3.0)]
+        summary = compute_summary_stats(results, experiment="prompting")
+
+        assert summary["metadata"]["sweep_dimension"] == "num_shots"
+        assert summary["metadata"]["sweep_values"] == ["0", "1", "3"]
+        assert summary["by_num_shots"]["0"]["flesch_kincaid_grade"]["mean"] == 4.0
+        assert summary["by_num_shots"]["3"]["flesch_kincaid_grade"]["mean"] == 3.0
+        assert list(summary["by_config"].keys()) == ["prompting_only"]
+
+    def test_summary_includes_beam_width_buckets(self, tmp_path: Path):
+        pipeline = ExperimentPipeline()
+        model = MockBeamModelWrapper()
+
+        def _result(beam_width: int, fk: float) -> ExperimentResult:
+            config = ExperimentConfig(
+                model_name="Qwen3",
+                config_weighting=False,
+                config_prompting=True,
+                prompt_id="p01",
+                experiment_name=f"Qwen3_beam_w{beam_width}",
+            )
+            result = pipeline.run_beam(
+                "What is a friend?", config, model, beam_width=beam_width
+            )
+            result.flesch_kincaid_grade = fk
+            return result
+
+        results = [_result(4, 4.0), _result(8, 3.5), _result(4, 3.0)]
+        summary = compute_summary_stats(results, experiment="beam")
+
+        assert summary["metadata"]["sweep_dimension"] == "beam_width"
+        assert summary["metadata"]["sweep_values"] == ["4", "8"]
+        assert summary["by_beam_width"]["4"]["count"] == 2
+        assert summary["by_beam_width"]["8"]["count"] == 1
+        assert summary["by_beam_width"]["4"]["flesch_kincaid_grade"]["mean"] == 3.5
+        assert list(summary["by_config"].keys()) == ["prompting_only"]
 
     def test_read_manifest_and_summary(self, tmp_path: Path):
         results = _make_results()

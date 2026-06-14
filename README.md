@@ -56,7 +56,7 @@ Every run writes a self-contained bundle to `results/runs/{run_id}/`:
 | `manifest.json` | Run metadata, CLI args, observation counts |
 | `specification.csv` | Reduced columns, European decimals (paper-compatible) |
 | `full.csv` | All fields including beam metadata |
-| `summary.json` | Aggregated stats (overall + by_config) |
+| `summary.json` | Aggregated stats (overall + by_config; Phase 2 adds sweep sections) |
 | `plots/` | Boxplots (after `plot --run-id`) |
 
 Run ID format: `{YYYYMMDD_HHMMSS}_{phase}_{experiment}`

@@ -9,26 +9,27 @@ Increases the probability of A1-level vocabulary tokens during autoregressive de
 ### Data Flow
 
 ```
-filtered_starters_vocab.txt (493 words)
+filtered_starters_vocab.txt (487 words)
     → tokenize each word → token IDs
-    → build logit_bias dict: {token_id: weight_factor}
+    → build logit_bias dict: {token_id: log(weight_factor)}
     → pass to llama.cpp at generation time
-    → at each step: logit[token_id] += weight_factor (before softmax)
+    → at each step: logit[token_id] += log(weight_factor) (before softmax)
 ```
 
 ### Vocabulary Loading
 
-On model wrapper init, `data/vocabularies/filtered_starters_vocab.txt` is loaded into `target_vocabulary` (493 words, lowercased). Includes punctuation and model stop tokens.
+On model wrapper init, `data/vocabularies/filtered_starters_vocab.txt` is loaded into `target_vocabulary` (487 words, lowercased). Punctuation-only entries and model stop tokens are skipped at load time.
 
 ### Building logit_bias
 
 ```python
 def _create_logit_bias(vocab, weight_factor):
+    bias_value = math.log(weight_factor)
     logit_bias = {}
     for word in vocab:
         tokens = llm.tokenize((" " + word).encode("utf-8"), add_bos=False)
         for token_id in tokens:
-            logit_bias[token_id] = weight_factor
+            logit_bias[token_id] = bias_value
     return logit_bias
 ```
 
@@ -36,17 +37,18 @@ The space prefix (`" " + word`) ensures token IDs match mid-sentence BPE tokeniz
 
 ### Mathematical Effect
 
-Adding constant `b` to a token's logit multiplies its probability by `e^b`:
+`weight_factor` is the target **probability multiplier** for A1 tokens. llama.cpp applies additive logit bias, so the code sets `bias = log(weight_factor)`:
 
-| weight_factor | Additive bias | Probability multiplier |
-|---------------|--------------|----------------------|
-| 1.0 | +1.0 | 2.72× |
-| 1.5 | +1.5 | 4.48× |
-| 2.0 | +2.0 | 7.39× |
-| 3.0 | +3.0 | 20.09× |
-| 4.0 | +4.0 | 54.60× |
+| weight_factor | Additive bias `log(w)` | Probability multiplier |
+|---------------|------------------------|------------------------|
+| 1.0 | 0.0 | 1.0× (no bias) |
+| 1.3 | +0.26 | 1.3× |
+| 1.5 | +0.41 | 1.5× |
+| 2.0 | +0.69 | 2.0× |
+| 3.0 | +1.10 | 3.0× |
+| 4.0 | +1.39 | 4.0× |
 
-**Important:** `weight_factor` is applied **directly** as the logit bias — not `log(weight_factor)`. This produces stronger biasing than a logarithmic transform would.
+**Important:** `weight_factor=1.0` means no biasing. Values above 1.0 increase A1 token probability by that factor (relative to other tokens, holding logits fixed).
 
 ### Phase 1 Defaults
 
@@ -82,14 +84,14 @@ Avoid complex grammar structures and difficult words.
 
 Weighting and beam disabled during prompting sweep.
 
-## 3. Beam Search with A1-Ratio Selection
+## 3. Best-of-N Sampling with A1-Ratio Selection
 
-Generates multiple candidate sequences and selects the one with the highest A1 vocabulary ratio.
+Generates `beam_width` **independent** stochastic samples (not canonical beam decoding) and selects the one with the highest A1 vocabulary ratio. The `BeamSearchGenerator` name is historical; behavior is best-of-N reranking.
 
 ### Algorithm
 
-1. Generate `beam_width` candidate sequences (temperature sampling)
-2. For each candidate, compute A1 ratio
+1. Run `beam_width` separate temperature-sampled generations (`echo=False` → response text only)
+2. For each candidate response, compute A1 ratio (prompt/context excluded)
 3. Select candidate with highest ratio
 4. Record beam metadata in `full.csv`
 
@@ -146,7 +148,7 @@ Qwen3 may emit `` blocks. Mitigation:
 
 | File | Role |
 |------|------|
-| `data/vocabularies/filtered_starters_vocab.txt` | A1 vocabulary (493 words) |
+| `data/vocabularies/filtered_starters_vocab.txt` | A1 vocabulary (487 words) |
 | `models/llamacpp.py` | `_create_logit_bias()`, generation with bias |
 | `models/beam.py` | Beam search with A1-ratio selection |
 | `evaluation/formatter.py` | Response cleaning, thinking-tag strip |

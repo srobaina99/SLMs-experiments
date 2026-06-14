@@ -181,6 +181,17 @@ class TestLlamaCppGenerateBeam:
         assert "beam_a1_ratio" in result
         assert result["response"]
 
+    def test_generate_beam_response_excludes_formatted_prompt(self, stub_wrapper):
+        config = ExperimentConfig(model_name="Stub", config_prompting=True)
+        result = stub_wrapper.generate_beam("What is a friend?", config, beam_width=4)
+
+        assert result["generation_successful"] is True
+        assert "SYS:" not in result["response"]
+        assert "USER:" not in result["response"]
+        assert "# Context" not in result["response"]
+        assert "What is a friend?" not in result["response"]
+        assert result["response"] == "Hello world."
+
     def test_generate_beam_model_not_loaded(self, tmp_path):
         model_path = tmp_path / "missing.gguf"
         wrapper = _StubLlamaCppWrapper(
@@ -226,6 +237,14 @@ class TestBeamSearchGenerator:
         assert len(result["beams"]) == 2
         assert all(isinstance(b, BeamCandidate) for b in result["beams"])
 
+    def test_generate_stores_response_only_not_prompt(self):
+        mock_llm = _make_mock_llm("Simple text.")
+        gen = BeamSearchGenerator(mock_llm, beam_width=2, max_length=50)
+        result = gen.generate("PROMPT:")
+        for beam in result["beams"]:
+            assert beam.sequence_text == "Simple text."
+            assert "PROMPT:" not in beam.sequence_text
+
     def test_select_best_beams(self):
         beams = [
             BeamCandidate([1], -1.0, "the cat runs"),
@@ -266,6 +285,23 @@ class TestVocabLoading:
     def test_base_loads_vocab_from_file(self, tmp_path):
         vocab = tmp_path / "vocab.txt"
         vocab.write_text("apple\nbanana\n", encoding="utf-8")
+
+        class MinimalWrapper(BaseModelWrapper):
+            def _generate_response_impl(self, prompt, config):
+                return {}
+
+            def _initialize_model(self):
+                pass
+
+        wrapper = MinimalWrapper("Test", vocab_path=str(vocab))
+        assert wrapper.target_vocabulary == ["apple", "banana"]
+
+    def test_base_skips_punctuation_and_special_tokens(self, tmp_path):
+        vocab = tmp_path / "vocab.txt"
+        vocab.write_text(
+            "apple\n.\n,\n<|endoftext|>\nbanana\n",
+            encoding="utf-8",
+        )
 
         class MinimalWrapper(BaseModelWrapper):
             def _generate_response_impl(self, prompt, config):

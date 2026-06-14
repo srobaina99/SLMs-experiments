@@ -23,7 +23,7 @@ Two inference-time interventions plus a control:
 
 ### 1. Probability Weighting (Logit Bias)
 
-Boosts A1 vocabulary tokens during decoding. The 493-word list in `data/vocabularies/filtered_starters_vocab.txt` is tokenized and mapped to a `logit_bias` dictionary passed to llama.cpp. The `weight_factor` is applied **directly** as the additive logit bias (not `log(weight_factor)`). See [docs/interventions.md](docs/interventions.md).
+Boosts A1 vocabulary tokens during decoding. The 487-word list in `data/vocabularies/filtered_starters_vocab.txt` is tokenized and mapped to a `logit_bias` dictionary passed to llama.cpp. `weight_factor` is the target probability multiplier; the code applies `log(weight_factor)` as the additive logit bias (`1.0` = no bias). See [docs/interventions.md](docs/interventions.md).
 
 ### 2. Contextual Prompting
 
@@ -119,15 +119,15 @@ All Phase 2 sweeps run on **all 4 models**. Each sweep varies one hyperparameter
 
 **Intervention:** Weighting + prompting ON ("Both" configuration)
 
-| Weight Factor | Additive Logit Bias | Approx. Probability Multiplier |
-|---------------|--------------------|-----------------------------|
-| 1.0 | +1.0 | 2.7× |
-| 1.3 | +1.3 | 3.7× |
-| 1.5 | +1.5 | 4.5× |
-| 2.0 | +2.0 | 7.4× |
-| 2.5 | +2.5 | 12.2× |
-| 3.0 | +3.0 | 20.1× |
-| 4.0 | +4.0 | 54.6× |
+| Weight Factor | Additive Logit Bias `log(w)` | Probability Multiplier |
+|---------------|-------------------------------|------------------------|
+| 1.0 | 0.0 | 1.0× (no bias) |
+| 1.3 | +0.26 | 1.3× |
+| 1.5 | +0.41 | 1.5× |
+| 2.0 | +0.69 | 2.0× |
+| 2.5 | +0.92 | 2.5× |
+| 3.0 | +1.10 | 3.0× |
+| 4.0 | +1.39 | 4.0× |
 
 Default grid: `1.0,1.3,1.5,2.0,2.5,3.0,4.0`
 
@@ -209,13 +209,19 @@ All fields including beam metadata (`beam_width`, `a1_ratio`, `candidates_genera
 
 ```json
 {
-  "overall": { "total": 48, "successful": 42, "success_rate": 0.875, "mean_fk": 3.2, ... },
+  "overall": { "flesch_kincaid_grade": { "mean": 3.2, "std": 0.5, ... }, ... },
   "by_config": {
-    "Qwen3_control": { "total": 3, "successful": 2, ... },
-    ...
-  }
+    "control": { "count": 12, "flesch_kincaid_grade": { "mean": 3.5, ... } },
+    "both": { "count": 84, "flesch_kincaid_grade": { "mean": 2.8, ... } }
+  },
+  "by_weight_factor": {
+    "1.5": { "count": 12, "flesch_kincaid_grade": { "mean": 2.9, ... } }
+  },
+  "metadata": { "total_experiments": 96, "sweep_dimension": "weight_factor", ... }
 }
 ```
+
+Phase 1 runs populate `by_config` only. Phase 2 sweeps add a sweep-specific section (`by_weight_factor`, `by_beam_width`, or `by_num_shots`) keyed by the swept hyperparameter. All Phase 2 weight runs share the same intervention flags, so `by_config` collapses to a single bucket (typically `both` or `prompting_only`); use the sweep section for per-grid-point analysis.
 
 Failed generations excluded from metric means.
 

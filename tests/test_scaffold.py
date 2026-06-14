@@ -23,7 +23,7 @@ class TestScaffold:
         vocab = REPO_ROOT / "data/vocabularies/filtered_starters_vocab.txt"
         assert vocab.exists()
         lines = [l.strip() for l in vocab.read_text().splitlines() if l.strip()]
-        assert len(lines) == 493
+        assert len(lines) == 487
 
     def test_requirements(self):
         assert (REPO_ROOT / "requirements.txt").exists()

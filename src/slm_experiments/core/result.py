@@ -31,6 +31,7 @@ class ExperimentResult:
 
     response_time_seconds: float
     generation_successful: bool = True
+    num_shots: int = 0
 
     flesch_kincaid_grade: float = 0.0
     gunning_fog: float = 0.0
@@ -84,6 +85,7 @@ class ExperimentResult:
             config_prompting=config.config_prompting,
             prompt_id=config.prompt_id,
             weight_factor=config.weight_factor,
+            num_shots=config.num_shots,
             temperature=config.temperature,
             response_time_seconds=response_time,
             generation_successful=generation_successful,

@@ -457,6 +457,24 @@ def main(argv: list[str] | None = None) -> None:
                     print(f"  {config_name}: n={count}, FK mean={fk:.2f}")
                 else:
                     print(f"  {config_name}: n={count}")
+
+        sweep_dimension = summary.get("metadata", {}).get("sweep_dimension")
+        sweep_sections = {
+            "weight_factor": "by_weight_factor",
+            "beam_width": "by_beam_width",
+            "num_shots": "by_num_shots",
+        }
+        sweep_section = sweep_sections.get(sweep_dimension or "")
+        sweep_stats = summary.get(sweep_section or "", {})
+        if sweep_stats:
+            print(f"\nBy {sweep_dimension}:")
+            for group_name, group_stats in sweep_stats.items():
+                count = group_stats.get("count", 0)
+                fk = group_stats.get("flesch_kincaid_grade", {}).get("mean")
+                if fk is not None:
+                    print(f"  {group_name}: n={count}, FK mean={fk:.2f}")
+                else:
+                    print(f"  {group_name}: n={count}")
         return
 
     print(f"Not implemented: {args.command}", file=sys.stderr)

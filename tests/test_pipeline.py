@@ -78,4 +78,5 @@ class TestExperimentPipeline:
         assert "weighted_words_enabled" not in field_names
         assert "enable_thinking" not in field_names
         assert "weight_factor" in field_names
+        assert "num_shots" in field_names
         assert "temperature" in field_names

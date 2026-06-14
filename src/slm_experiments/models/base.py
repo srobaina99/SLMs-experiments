@@ -23,6 +23,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(_PACKAGE_DIR)))
 DEFAULT_VOCAB_PATH = os.path.join(
     REPO_ROOT, "data", "vocabularies", "filtered_starters_vocab.txt"
 )
+_SKIP_VOCAB_ENTRIES = frozenset({"<|im_end|>", "<|endoftext|>"})
 LOCAL_GGUF_DIR = os.path.join(REPO_ROOT, "models", "gguf")
 THESIS_GGUF_DIR = os.path.normpath(
     os.path.join(REPO_ROOT, "..", "SLMs-master-thesis", "Tesis", "Codigo", "models", "gguf")
@@ -125,7 +126,15 @@ class BaseModelWrapper(ABC):
         """Load A1 vocabulary for probability weighting."""
         try:
             with open(self.vocab_path, "r", encoding="utf-8") as f:
-                return [line.strip().lower() for line in f if line.strip()]
+                vocab: List[str] = []
+                for line in f:
+                    word = line.strip().lower()
+                    if not word or word in _SKIP_VOCAB_ENTRIES:
+                        continue
+                    if len(word) == 1 and not word.isalnum():
+                        continue
+                    vocab.append(word)
+                return vocab
         except FileNotFoundError:
             return []
 

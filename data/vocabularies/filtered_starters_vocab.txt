@@ -485,9 +485,3 @@ Sam
 Sue
 Tom
 Tony
-.
-,
-!
-?
-<|im_end|>
-<|endoftext|>
