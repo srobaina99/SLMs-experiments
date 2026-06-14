@@ -237,6 +237,13 @@ class TestBeamSearchGenerator:
         assert len(result["beams"]) == 2
         assert all(isinstance(b, BeamCandidate) for b in result["beams"])
 
+    def test_generate_passes_stop_tokens(self):
+        mock_llm = _make_mock_llm("Simple text.")
+        gen = BeamSearchGenerator(mock_llm, beam_width=2, max_length=50)
+        gen.generate("PROMPT:", stop=["STOP", "<|endoftext|>"])
+        for call in mock_llm.call_args_list:
+            assert call[1]["stop"] == ["STOP", "<|endoftext|>"]
+
     def test_generate_stores_response_only_not_prompt(self):
         mock_llm = _make_mock_llm("Simple text.")
         gen = BeamSearchGenerator(mock_llm, beam_width=2, max_length=50)
@@ -251,11 +258,78 @@ class TestBeamSearchGenerator:
             BeamCandidate([2], -2.0, "hello friend play"),
         ]
         gen = BeamSearchGenerator(MagicMock(), beam_width=2)
-        content = {"cat", "runs", "hello", "friend", "play"}
         a1_vocab = ["cat", "hello", "friend"]
-        selection = gen.select_best_beams(beams, a1_vocab, content)
+
+        def extract_content_words(text: str) -> set:
+            return {word for word in text.split() if word.isalpha()}
+
+        def prepare_scoring_text(text: str) -> str:
+            return text.strip()
+
+        selection = gen.select_best_beams(
+            beams,
+            a1_vocab,
+            extract_content_words=extract_content_words,
+            prepare_scoring_text=prepare_scoring_text,
+        )
         assert selection["best_by_a1_ratio"] is not None
         assert selection["best_by_probability"] is not None
+
+    def test_select_best_beams_scores_prepared_text_not_raw(self):
+        beams = [
+            BeamCandidate([1], -1.0, "hello friend STOP extra junk"),
+            BeamCandidate([2], -2.0, "the cat runs"),
+        ]
+        gen = BeamSearchGenerator(MagicMock(), beam_width=2)
+        a1_vocab = ["hello", "friend", "cat"]
+
+        def extract_content_words(text: str) -> set:
+            return {word for word in text.split() if word.isalpha()}
+
+        def prepare_scoring_text(text: str) -> str:
+            return text.split("STOP")[0].strip()
+
+        selection = gen.select_best_beams(
+            beams,
+            a1_vocab,
+            extract_content_words=extract_content_words,
+            prepare_scoring_text=prepare_scoring_text,
+        )
+        best = selection["best_by_a1_ratio"]
+        assert best["scoring_text"] == "hello friend"
+        assert best["beam"].sequence_text.startswith("hello friend STOP")
+
+    def test_select_best_beams_uses_per_beam_content_words(self):
+        beams = [
+            BeamCandidate([1], -1.0, "play runs"),
+            BeamCandidate([2], -2.0, "hello friend"),
+        ]
+        gen = BeamSearchGenerator(MagicMock(), beam_width=2)
+        a1_vocab = ["hello", "friend", "play"]
+        content_word_calls: list[str] = []
+
+        def extract_content_words(text: str) -> set:
+            content_word_calls.append(text)
+            if text == "play runs":
+                return {"play", "runs"}
+            return {"hello", "friend"}
+
+        selection = gen.select_best_beams(
+            beams,
+            a1_vocab,
+            extract_content_words=extract_content_words,
+            prepare_scoring_text=lambda text: text.strip(),
+        )
+        assert content_word_calls == ["play runs", "hello friend"]
+        best = selection["best_by_a1_ratio"]
+        assert best["scoring_text"] == "hello friend"
+        assert best["a1_ratio"] == pytest.approx(1.5)
+
+    def test_generate_beam_passes_stop_to_llm(self, stub_wrapper):
+        config = ExperimentConfig(model_name="Stub")
+        stub_wrapper.generate_beam("What is a friend?", config, beam_width=2)
+        for call in stub_wrapper.llm.call_args_list:
+            assert call[1]["stop"] == ["STOP"]
 
 
 class TestGgufPathResolution:

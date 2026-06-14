@@ -2,7 +2,7 @@
 
 import math
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 
 @dataclass
@@ -40,6 +40,7 @@ class BeamSearchGenerator:
         temperature: float = 0.7,
         top_p: float = 0.95,
         top_k: int = 50,
+        stop: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Generate beam_width candidate sequences via stochastic sampling."""
         beams: List[BeamCandidate] = []
@@ -52,6 +53,7 @@ class BeamSearchGenerator:
                     temperature=temperature,
                     top_p=top_p,
                     top_k=top_k,
+                    stop=stop,
                     echo=False,
                 )
 
@@ -116,18 +118,22 @@ class BeamSearchGenerator:
         self,
         beams: List[BeamCandidate],
         a1_vocab: List[str],
-        content_words_set: set,
+        extract_content_words: Callable[[str], set],
+        prepare_scoring_text: Callable[[str], str],
     ) -> Dict[str, Optional[Dict[str, Any]]]:
         """Return best beams by A1 ratio and by cumulative log probability."""
         scored_beams: List[Dict[str, Any]] = []
 
         for beam in beams:
+            scoring_text = prepare_scoring_text(beam.sequence_text)
+            content_words_set = extract_content_words(scoring_text)
             a1_ratio, a1_count, content_count = self.calculate_a1_ratio(
-                beam.sequence_text, a1_vocab, content_words_set
+                scoring_text, a1_vocab, content_words_set
             )
             scored_beams.append(
                 {
                     "beam": beam,
+                    "scoring_text": scoring_text,
                     "a1_ratio": a1_ratio,
                     "a1_count": a1_count,
                     "content_count": content_count,

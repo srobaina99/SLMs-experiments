@@ -128,6 +128,12 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
                 continue
         return logit_bias
 
+    def _prepare_beam_scoring_text(self, raw_output: str) -> str:
+        """Extract and clean beam candidate text before A1-ratio scoring."""
+        return self.response_formatter.clean_response_for_evaluation(
+            self._extract_response(raw_output)
+        )
+
     def _generate_response_impl(
         self, prompt: str, config: ExperimentConfig
     ) -> Dict[str, Any]:
@@ -326,19 +332,14 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
                 temperature=config.temperature,
                 top_p=config.top_p,
                 top_k=config.top_k,
+                stop=self._get_stop_tokens(),
             )
-
-            content_words_union = set()
-            for beam in beam_results["beams"]:
-                content_words = self.text_evaluator.extract_content_words(
-                    beam.sequence_text
-                )
-                content_words_union.update(content_words)
 
             selection_results = beam_generator.select_best_beams(
                 beam_results["beams"],
                 a1_vocab=self.target_vocabulary,
-                content_words_set=content_words_union,
+                extract_content_words=self.text_evaluator.extract_content_words,
+                prepare_scoring_text=self._prepare_beam_scoring_text,
             )
 
             if selection_method == "a1_ratio":
@@ -359,8 +360,7 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
                     "beam_cumulative_logprob": 0.0,
                 }
 
-            response = self._extract_response(selected_beam_data["beam"].sequence_text)
-            response = self.response_formatter.clean_response_for_evaluation(response)
+            response = selected_beam_data["scoring_text"]
 
             if not response.strip():
                 return {
