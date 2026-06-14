@@ -17,6 +17,12 @@ SIMPLE_RESPONSE = (
     "You play with a friend. A friend helps you."
 )
 
+COMPLEX_RESPONSE = (
+    "The multifaceted ramifications of epistemological paradigms necessitate "
+    "comprehensive interdisciplinary investigation. Furthermore, methodological "
+    "inconsistencies undermine the validity of longitudinal analyses."
+)
+
 
 class MockSuccessModel:
     def generate(self, prompt: str, config: ExperimentConfig) -> dict:
@@ -48,6 +54,15 @@ class MockBeamModelWrapper:
         }
 
 
+class MockComplexModel:
+    def generate(self, prompt: str, config: ExperimentConfig) -> dict:
+        return {
+            "response": COMPLEX_RESPONSE,
+            "response_time_seconds": 2.0,
+            "generation_successful": True,
+        }
+
+
 class MockFailureModel:
     def generate(self, prompt: str, config: ExperimentConfig) -> dict:
         return {
@@ -55,6 +70,26 @@ class MockFailureModel:
             "response_time_seconds": 0.5,
             "generation_successful": False,
         }
+
+
+def _make_a1_pipeline_results():
+    """One A1-passing and one valid-but-failing result from the pipeline."""
+    pipeline = ExperimentPipeline()
+    config_simple = ExperimentConfig(
+        model_name="Qwen3",
+        config_weighting=False,
+        config_prompting=True,
+        prompt_id="p01",
+    )
+    config_complex = ExperimentConfig(
+        model_name="Qwen3",
+        config_weighting=True,
+        config_prompting=False,
+        prompt_id="p02",
+    )
+    simple = pipeline.run("What is a friend?", config_simple, MockSuccessModel())
+    complex = pipeline.run("What is a friend?", config_complex, MockComplexModel())
+    return [simple, complex]
 
 
 def _make_results():
@@ -152,6 +187,51 @@ class TestRunStore:
         assert summary["by_config"]["prompting_only"]["a1_pass_rate"] == 1.0
         assert summary["by_config"]["weighting_only"]["a1_pass_count"] == 0
         assert summary["by_config"]["weighting_only"]["a1_pass_rate"] == 0.0
+
+    def test_summary_a1_pass_rate_from_pipeline_results(self):
+        results = _make_a1_pipeline_results()
+        summary = compute_summary_stats(results)
+
+        assert summary["metadata"]["a1_pass_experiments"] == 1
+        assert summary["metadata"]["a1_pass_rate"] == 0.5
+        assert summary["by_config"]["prompting_only"]["a1_pass_count"] == 1
+        assert summary["by_config"]["weighting_only"]["a1_pass_count"] == 0
+        assert summary["by_config"]["prompting_only"]["generation_successful_count"] == 1
+        assert summary["by_config"]["prompting_only"]["generation_failure_rate"] == 0.0
+        assert summary["by_config"]["weighting_only"]["generation_successful_count"] == 1
+        assert summary["by_config"]["weighting_only"]["generation_failure_rate"] == 0.0
+        assert summary["by_config"]["prompting_only"]["a1_pass_rate_given_valid"] == 1.0
+        assert summary["by_config"]["weighting_only"]["a1_pass_rate_given_valid"] == 0.0
+
+        valid_count = sum(
+            group["generation_successful_count"]
+            for group in summary["by_config"].values()
+        )
+        a1_pass_among_valid = sum(
+            group["a1_pass_rate_given_valid"] * group["generation_successful_count"]
+            for group in summary["by_config"].values()
+        ) / valid_count
+        assert a1_pass_among_valid == 0.5
+
+    def test_specification_csv_meets_a1_criteria_values(self, tmp_path: Path):
+        results = _make_a1_pipeline_results()
+        store = RunStore(tmp_path)
+        run_id = make_run_id(1, "factorial")
+        out_dir = store.write_bundle(run_id, results, phase=1, experiment="factorial")
+
+        spec = pd.read_csv(out_dir / "specification.csv")
+        by_prompt = spec.set_index("prompt_id")["meets_a1_criteria"]
+        assert by_prompt["p01"] == True  # noqa: E712
+        assert by_prompt["p02"] == False  # noqa: E712
+
+    def test_summary_a1_secondary_fields(self):
+        results = _make_results()
+        summary = compute_summary_stats(results)
+
+        assert summary["by_config"]["prompting_only"]["generation_successful_count"] == 1
+        assert summary["by_config"]["prompting_only"]["generation_failure_rate"] == 0.0
+        assert summary["by_config"]["weighting_only"]["generation_successful_count"] == 0
+        assert summary["by_config"]["weighting_only"]["generation_failure_rate"] == 1.0
 
     def test_summary_excludes_failed_from_metric_means(self, tmp_path: Path):
         results = _make_results()

@@ -12,6 +12,12 @@ SIMPLE_RESPONSE = (
     "You play with a friend. A friend helps you."
 )
 
+COMPLEX_RESPONSE = (
+    "The multifaceted ramifications of epistemological paradigms necessitate "
+    "comprehensive interdisciplinary investigation. Furthermore, methodological "
+    "inconsistencies undermine the validity of longitudinal analyses."
+)
+
 
 class MockSuccessModel:
     def generate(self, prompt: str, config: ExperimentConfig) -> dict:
@@ -39,6 +45,45 @@ class MockEmptySuccessModel:
             "response": "   ",
             "response_time_seconds": 0.1,
             "generation_successful": True,
+        }
+
+
+class MockComplexModel:
+    def generate(self, prompt: str, config: ExperimentConfig) -> dict:
+        return {
+            "response": COMPLEX_RESPONSE,
+            "response_time_seconds": 1.0,
+            "generation_successful": True,
+        }
+
+
+class MockBeamSuccessModel:
+    def generate_beam(self, prompt, config, beam_width=4, selection_method="a1_ratio"):
+        return {
+            "response": SIMPLE_RESPONSE,
+            "response_time_seconds": 1.0,
+            "generation_successful": True,
+            "beam_selection_method": selection_method,
+            "beam_a1_ratio": 0.75,
+            "beam_a1_count": 3,
+            "beam_content_word_count": 6,
+            "beam_cumulative_logprob": -1.2,
+            "beam_width": beam_width,
+        }
+
+
+class MockBeamComplexModel:
+    def generate_beam(self, prompt, config, beam_width=4, selection_method="a1_ratio"):
+        return {
+            "response": COMPLEX_RESPONSE,
+            "response_time_seconds": 1.0,
+            "generation_successful": True,
+            "beam_selection_method": selection_method,
+            "beam_a1_ratio": 0.1,
+            "beam_a1_count": 0,
+            "beam_content_word_count": 10,
+            "beam_cumulative_logprob": -2.0,
+            "beam_width": beam_width,
         }
 
 
@@ -96,4 +141,37 @@ class TestExperimentPipeline:
         result = pipeline.run("What is a friend?", config, MockFailureModel())
 
         assert result.generation_successful is False
+        assert result.meets_a1_criteria is False
+
+    def test_meets_a1_criteria_false_when_text_too_complex(self):
+        config = ExperimentConfig(model_name="Qwen3", prompt_id="p04")
+        pipeline = ExperimentPipeline()
+        result = pipeline.run("Explain epistemology.", config, MockComplexModel())
+
+        assert result.generation_successful is True
+        assert result.meets_a1_criteria is False
+        assert (
+            result.flesch_kincaid_grade > 5
+            or result.gunning_fog > 6
+            or result.spache_readability > 4
+        )
+
+    def test_run_beam_sets_meets_a1_true_on_simple_text(self):
+        config = ExperimentConfig(model_name="Qwen3", prompt_id="p05")
+        pipeline = ExperimentPipeline()
+        result = pipeline.run_beam(
+            "What is a friend?", config, MockBeamSuccessModel(), beam_width=4
+        )
+
+        assert result.generation_successful is True
+        assert result.meets_a1_criteria is True
+
+    def test_run_beam_sets_meets_a1_false_on_complex_text(self):
+        config = ExperimentConfig(model_name="Qwen3", prompt_id="p06")
+        pipeline = ExperimentPipeline()
+        result = pipeline.run_beam(
+            "Explain epistemology.", config, MockBeamComplexModel(), beam_width=4
+        )
+
+        assert result.generation_successful is True
         assert result.meets_a1_criteria is False
