@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional, Protocol, runtime_checkable
 
 from slm_experiments.core.config import ExperimentConfig
 from slm_experiments.core.result import ExperimentResult
+from slm_experiments.evaluation.a1_criteria import meets_a1_criteria
 from slm_experiments.evaluation.formatter import ResponseFormatter
 from slm_experiments.evaluation.metrics import TextEvaluator
 
@@ -63,6 +64,14 @@ class ExperimentPipeline:
 
         if is_successful:
             text_metrics = self.text_evaluator.evaluate_text_comprehensive(cleaned)
+            grade = text_metrics.get("grade_level_indices", {})
+            read = text_metrics.get("readability_scores", {})
+            meets_a1 = meets_a1_criteria(
+                grade.get("flesch_kincaid_grade", 0.0),
+                grade.get("gunning_fog", 0.0),
+                read.get("spache_readability", 0.0),
+                generation_valid=True,
+            )
             return ExperimentResult.create_from_response(
                 prompt=prompt,
                 response=raw_response,
@@ -72,6 +81,7 @@ class ExperimentPipeline:
                 experiment_name=name,
                 cleaned_response=cleaned,
                 generation_successful=True,
+                meets_a1_criteria=meets_a1,
             )
 
         empty_metrics = self.text_evaluator.evaluate_text_comprehensive("")
@@ -84,6 +94,7 @@ class ExperimentPipeline:
             experiment_name=name,
             cleaned_response=cleaned,
             generation_successful=False,
+            meets_a1_criteria=False,
         )
 
     def run_beam(
@@ -128,6 +139,14 @@ class ExperimentPipeline:
 
         if is_successful:
             text_metrics = self.text_evaluator.evaluate_text_comprehensive(cleaned)
+            grade = text_metrics.get("grade_level_indices", {})
+            read = text_metrics.get("readability_scores", {})
+            meets_a1 = meets_a1_criteria(
+                grade.get("flesch_kincaid_grade", 0.0),
+                grade.get("gunning_fog", 0.0),
+                read.get("spache_readability", 0.0),
+                generation_valid=True,
+            )
             return ExperimentResult.create_from_beam_response(
                 prompt=prompt,
                 response=raw_response,
@@ -137,6 +156,7 @@ class ExperimentPipeline:
                 experiment_name=name,
                 cleaned_response=cleaned,
                 generation_successful=True,
+                meets_a1_criteria=meets_a1,
                 **beam_kwargs,
             )
 
@@ -150,5 +170,6 @@ class ExperimentPipeline:
             experiment_name=name,
             cleaned_response=cleaned,
             generation_successful=False,
+            meets_a1_criteria=False,
             **beam_kwargs,
         )

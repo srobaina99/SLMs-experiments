@@ -127,6 +127,7 @@ class TestRunStore:
             "answer",
             "time_spent",
             "generation_successful",
+            "meets_a1_criteria",
             "flesch_kincaid_grade",
             "gunning_fog",
             "spache_readability",
@@ -135,6 +136,22 @@ class TestRunStore:
         ]
         assert list(spec.columns) == expected_cols
         assert "weight_factor" not in spec.columns
+
+    def test_summary_includes_a1_pass_rate(self, tmp_path: Path):
+        results = _make_results()
+        success = next(r for r in results if r.generation_successful)
+        success.meets_a1_criteria = True
+        fail = next(r for r in results if not r.generation_successful)
+        fail.meets_a1_criteria = False
+
+        summary = compute_summary_stats(results)
+
+        assert summary["metadata"]["a1_pass_experiments"] == 1
+        assert summary["metadata"]["a1_pass_rate"] == 0.5
+        assert summary["by_config"]["prompting_only"]["a1_pass_count"] == 1
+        assert summary["by_config"]["prompting_only"]["a1_pass_rate"] == 1.0
+        assert summary["by_config"]["weighting_only"]["a1_pass_count"] == 0
+        assert summary["by_config"]["weighting_only"]["a1_pass_rate"] == 0.0
 
     def test_summary_excludes_failed_from_metric_means(self, tmp_path: Path):
         results = _make_results()

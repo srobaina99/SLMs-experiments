@@ -31,6 +31,7 @@ class ExperimentResult:
 
     response_time_seconds: float
     generation_successful: bool = True
+    meets_a1_criteria: bool = False
     num_shots: int = 0
 
     flesch_kincaid_grade: float = 0.0
@@ -65,6 +66,7 @@ class ExperimentResult:
         experiment_name: str = "default",
         cleaned_response: str = "",
         generation_successful: bool = True,
+        meets_a1_criteria: bool = False,
     ) -> "ExperimentResult":
         """Create ExperimentResult from response data and metrics."""
         grade_indices = text_metrics.get("grade_level_indices", {})
@@ -89,6 +91,7 @@ class ExperimentResult:
             temperature=config.temperature,
             response_time_seconds=response_time,
             generation_successful=generation_successful,
+            meets_a1_criteria=meets_a1_criteria,
             flesch_kincaid_grade=grade_indices.get("flesch_kincaid_grade", 0.0),
             gunning_fog=grade_indices.get("gunning_fog", 0.0),
             spache_readability=readability_scores.get("spache_readability", 0.0),
@@ -108,6 +111,7 @@ class ExperimentResult:
         experiment_name: str = "default",
         cleaned_response: str = "",
         generation_successful: bool = True,
+        meets_a1_criteria: bool = False,
         beam_selection_method: str = "a1_ratio",
         beam_a1_ratio: float = 0.0,
         beam_a1_count: int = 0,
@@ -125,6 +129,7 @@ class ExperimentResult:
             experiment_name=experiment_name,
             cleaned_response=cleaned_response,
             generation_successful=generation_successful,
+            meets_a1_criteria=meets_a1_criteria,
         )
         result.beam_selection_method = beam_selection_method
         result.beam_a1_ratio = beam_a1_ratio

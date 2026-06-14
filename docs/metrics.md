@@ -67,7 +67,9 @@ Not used for success criteria but included in output for interpretation.
 
 ## Success Criteria
 
-A generation is successful when **all three** primary thresholds are met simultaneously:
+**Generation success** (`generation_successful=True`) means valid, non-empty output with computable metrics.
+
+**A1 pass** (`meets_a1_criteria=True`) means **all three** primary thresholds are met simultaneously on a valid generation:
 
 | Metric | Threshold |
 |--------|-----------|
@@ -81,7 +83,7 @@ SMOG Index requires a minimum of 30 sentences. Typical model outputs are 1–3 s
 
 ## Failed Generations
 
-When generation fails (empty output, unparseable response, thinking-tag artifacts), metrics are **not computed**. The observation is recorded with `generation_successful=False` and excluded from `summary.json` metric aggregates.
+When generation fails (empty output, unparseable response, thinking-tag artifacts), metrics are **not computed**. The observation is recorded with `generation_successful=False` and `meets_a1_criteria=False`, and excluded from `summary.json` metric means. A1 pass rate (`a1_pass_rate`) is still computed over all observations.
 
 ## Metric Selection Rationale
 

@@ -17,6 +17,7 @@ SPEC_COLUMNS = [
     "answer",
     "time_spent",
     "generation_successful",
+    "meets_a1_criteria",
     "flesch_kincaid_grade",
     "gunning_fog",
     "spache_readability",
@@ -55,7 +56,24 @@ def _sweep_sort_key(column: str, value: Any) -> float:
 def _aggregate_metric_stats(df: pd.DataFrame) -> Dict[str, Any]:
     """Build count + metric stats for one group, excluding failed generations."""
     successful = df[df["generation_successful"] == True]  # noqa: E712
-    stats: Dict[str, Any] = {"count": int(len(df))}
+    stats: Dict[str, Any] = {
+        "count": int(len(df)),
+        "generation_successful_count": int(len(successful)),
+    }
+    if len(df) > 0:
+        stats["generation_failure_rate"] = float(1 - len(successful) / len(df))
+    else:
+        stats["generation_failure_rate"] = 0.0
+
+    if "meets_a1_criteria" in df.columns:
+        a1_pass = int(df["meets_a1_criteria"].sum())
+        stats["a1_pass_count"] = a1_pass
+        stats["a1_pass_rate"] = float(a1_pass / len(df)) if len(df) else 0.0
+        if not successful.empty:
+            stats["a1_pass_rate_given_valid"] = float(
+                successful["meets_a1_criteria"].sum() / len(successful)
+            )
+
     for col in NUMERIC_SUMMARY_COLUMNS:
         if col in successful.columns and not successful.empty:
             stats[col] = _metric_stats(successful[col])
@@ -165,6 +183,12 @@ def compute_summary_stats(
     }
     if "model" in df.columns:
         summary["metadata"]["models_tested"] = df["model"].unique().tolist()
+
+    if "meets_a1_criteria" in df.columns:
+        summary["metadata"]["a1_pass_experiments"] = int(df["meets_a1_criteria"].sum())
+        summary["metadata"]["a1_pass_rate"] = float(
+            df["meets_a1_criteria"].sum() / len(df)
+        ) if len(df) else 0.0
 
     return summary
 

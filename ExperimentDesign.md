@@ -99,7 +99,9 @@ No weighting, no contextual prompting.
 
 ### Success Criteria
 
-A generation is **successful** when all three readability thresholds are met:
+**Generation success** (`generation_successful=True`) means the model produced valid, non-empty output with computable metrics. Failed generations (empty output, thinking-tag artifacts, metric computation errors) are recorded with `generation_successful=False` and excluded from summary metric means.
+
+**A1 pass** (`meets_a1_criteria=True`) means all three readability thresholds are met on a valid generation:
 
 | Metric | Threshold |
 |--------|-----------|
@@ -109,7 +111,7 @@ A generation is **successful** when all three readability thresholds are met:
 
 SMOG is **not** used — short model outputs cannot satisfy its 30-sentence minimum.
 
-Failed generations (empty output, thinking-tag artifacts, metric computation errors) are recorded with `generation_successful=False` and excluded from summary aggregates.
+`summary.json` reports `a1_pass_rate` and `a1_pass_count` across all observations; metric means still exclude failed generations.
 
 ## Phase 2 — Hyperparameter Sweeps
 
@@ -197,7 +199,7 @@ Every run produces a bundle in `results/runs/{run_id}/`:
 Reduced columns with European decimal format (`decimal=','`):
 
 - `model`, `config_weighting`, `config_prompting`, `prompt_id`
-- `answer`, `time_spent`, `generation_successful`
+- `answer`, `time_spent`, `generation_successful`, `meets_a1_criteria`
 - `flesch_kincaid_grade`, `gunning_fog`, `spache_readability`
 - `word_count`, `difficult_words`
 

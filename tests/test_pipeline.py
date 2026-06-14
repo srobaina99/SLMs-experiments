@@ -80,3 +80,20 @@ class TestExperimentPipeline:
         assert "weight_factor" in field_names
         assert "num_shots" in field_names
         assert "temperature" in field_names
+        assert "meets_a1_criteria" in field_names
+
+    def test_meets_a1_criteria_set_on_success(self):
+        config = ExperimentConfig(model_name="Qwen3", prompt_id="p01")
+        pipeline = ExperimentPipeline()
+        result = pipeline.run("What is a friend?", config, MockSuccessModel())
+
+        assert result.generation_successful is True
+        assert result.meets_a1_criteria is True
+
+    def test_meets_a1_criteria_false_on_failure(self):
+        config = ExperimentConfig(model_name="Qwen3", prompt_id="p02")
+        pipeline = ExperimentPipeline()
+        result = pipeline.run("What is a friend?", config, MockFailureModel())
+
+        assert result.generation_successful is False
+        assert result.meets_a1_criteria is False
