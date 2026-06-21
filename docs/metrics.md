@@ -65,6 +65,49 @@ Not used for success criteria but included in output for interpretation.
 | **Word count** | Verbosity / cognitive load indicator (target: 30–60 words) |
 | **Difficult words** | Count of words not in Dale-Chall easy list with 3+ syllables |
 
+## KVL / GLMM Vocabulary Difficulty (secondary)
+
+External, learner-grounded vocabulary metrics from the [BEA 2026 Shared Task](https://github.com/britishcouncil/bea2026st) (British Council Knowledge-based Vocabulary Lists). Implemented in `src/slm_experiments/evaluation/kvl.py`.
+
+**What it measures:** Whether content words in a model response are likely known by real L2 learners (by L1), using GLMM difficulty estimates from vocabulary knowledge tests. This complements — but does not replace — readability formulas or the internal 487-word A1 list used for logit bias and beam reranking.
+
+| Dimension | Metric |
+|-----------|--------|
+| Sentence structure | Flesch-Kincaid |
+| Polysyllabic complexity | Gunning Fog |
+| Primary-grade vocabulary | Spache |
+| **Learner-known vocabulary (external)** | **KVL / GLMM** |
+| Internal A1 word overlap | Beam A1 ratio (487-word list) |
+
+**License:** Source data is [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) — non-commercial use only. See `data/kvl/README.md` for provenance and rebuild instructions.
+
+**Default L1:** Spanish (`es`), configurable via `ExperimentConfig.kvl_l1`. Lookups also available for German (`de`) and Mandarin (`cn`).
+
+### Columns
+
+Computed on **content words** from `cleaned_response` (same NLTK POS extraction as beam A1-ratio scoring):
+
+| Column | Type | Definition |
+|--------|------|------------|
+| `kvl_l1` | str | L1 code used for lookup (`es`, `de`, or `cn`) |
+| `kvl_content_word_count` | int | Number of content words extracted |
+| `kvl_lookup_count` | int | Content words found in KVL lookup |
+| `kvl_oov_count` | int | Content words not found in KVL lookup (`kvl_content_word_count − kvl_lookup_count`) |
+| `kvl_lookup_coverage` | float | `kvl_lookup_count / kvl_content_word_count` (0 if none) |
+| `kvl_mean_score` | float \| None | Mean GLMM score over looked-up words; None if none found |
+| `kvl_min_score` | float \| None | Min GLMM (hardest looked-up word); None if none found |
+| `kvl_pct_hard_words` | float \| None | Fraction of looked-up words with GLMM < −1.0; None if none found |
+
+**Interpretation:** Higher `kvl_mean_score` = easier vocabulary for that L1. Lower `kvl_min_score` = at least one very hard word present. GLMM range ≈ −6 to +5.
+
+### Limitations
+
+- **Lemma-only lookup (v1):** Keys are lowercased surface forms; no POS disambiguation. Inflected forms not in the ~6.8k-word lookup are OOV.
+- **Productive knowledge proxy:** Scores reflect estimated receptive knowledge from learner tests, not production frequency.
+- **No pass/fail criterion:** KVL metrics are recorded for analysis only; `meets_a1_criteria` is unchanged.
+
+Failed generations receive zero counts and `None` aggregates, and are excluded from `summary.json` KVL means (same as readability metrics).
+
 ## Success Criteria
 
 **Generation success** (`generation_successful=True`) means valid, non-empty output with computable metrics.
@@ -92,6 +135,7 @@ When generation fails (empty output, unparseable response, thinking-tag artifact
 | Sentence structure | Flesch-Kincaid |
 | Polysyllabic complexity | Gunning Fog |
 | Vocabulary difficulty (primary-grade) | Spache |
+| Learner-known vocabulary (external) | KVL / GLMM |
 
 These three metrics provide non-redundant coverage calibrated for A1 learners without the SMOG short-text problem.
 

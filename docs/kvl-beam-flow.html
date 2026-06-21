@@ -1,0 +1,996 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KVL-Scored Real Beam Search — SLMs-experiments</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface-2: #242836;
+      --surface-3: #2c3142;
+      --border: #2e3345;
+      --text: #e8eaf0;
+      --muted: #8b92a8;
+      --accent: #6c9eff;
+      --accent-dim: #4a7ad4;
+      --green: #4ade80;
+      --green-dim: #22c55e22;
+      --amber: #fbbf24;
+      --amber-dim: #fbbf2422;
+      --red: #f87171;
+      --red-dim: #f8717122;
+      --purple: #c084fc;
+      --purple-dim: #c084fc22;
+      --teal: #2dd4bf;
+      --teal-dim: #2dd4bf22;
+      --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+      --mono: ui-monospace, "Cascadia Code", "SF Mono", monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.65;
+      min-height: 100vh;
+    }
+
+    .hero {
+      background: linear-gradient(135deg, #141824 0%, #1a2840 45%, #1a2035 100%);
+      border-bottom: 1px solid var(--border);
+      padding: 3rem 1.5rem 2.5rem;
+      text-align: center;
+    }
+
+    .hero h1 {
+      font-size: clamp(1.7rem, 4vw, 2.5rem);
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      margin-bottom: 0.75rem;
+    }
+
+    .hero .subtitle {
+      color: var(--muted);
+      max-width: 720px;
+      margin: 0 auto 1.25rem;
+      font-size: 1.05rem;
+    }
+
+    .status-badge {
+      display: inline-block;
+      font-size: 0.72rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 0.25rem 0.65rem;
+      border-radius: 999px;
+      background: var(--amber-dim);
+      color: var(--amber);
+      border: 1px solid #fbbf2444;
+    }
+
+    .container {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 2.5rem 1.5rem 4rem;
+    }
+
+    section { margin-bottom: 3.25rem; }
+
+    h2 {
+      font-size: 1.35rem;
+      font-weight: 600;
+      margin-bottom: 0.85rem;
+      letter-spacing: -0.02em;
+    }
+
+    h3 {
+      font-size: 0.82rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 0.75rem;
+    }
+
+    p, li { color: #c4c9d8; }
+    p { margin-bottom: 0.85rem; }
+    ul, ol { padding-left: 1.35rem; margin-bottom: 0.85rem; }
+    li { margin-bottom: 0.35rem; }
+
+    code, .mono {
+      font-family: var(--mono);
+      font-size: 0.88em;
+    }
+
+    code {
+      background: var(--surface-2);
+      padding: 0.12rem 0.35rem;
+      border-radius: 4px;
+      color: var(--teal);
+    }
+
+    .compare-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1rem;
+      margin: 1.25rem 0;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem;
+    }
+
+    .card.current { border-top: 3px solid var(--amber); }
+    .card.proposed { border-top: 3px solid var(--accent); }
+
+    .card h4 {
+      font-size: 1rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .tag {
+      display: inline-block;
+      font-size: 0.68rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+      margin-bottom: 0.5rem;
+    }
+
+    .tag.amber { background: var(--amber-dim); color: var(--amber); }
+    .tag.blue  { background: #6c9eff22; color: var(--accent); }
+
+    /* Flow diagram */
+    .flow-diagram {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 1.5rem;
+      overflow-x: auto;
+    }
+
+    .flow-diagram svg { display: block; margin: 0 auto; max-width: 100%; height: auto; }
+
+    /* Architecture diagram */
+    .arch-diagram {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 1.5rem 1rem;
+      overflow-x: auto;
+    }
+
+    /* Decode steps */
+    .decode-panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+    }
+
+    .prompt-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 1rem 1.25rem;
+      background: var(--surface-2);
+      border-bottom: 1px solid var(--border);
+      font-family: var(--mono);
+      font-size: 0.9rem;
+    }
+
+    .prompt-bar .label { color: var(--muted); }
+    .prompt-bar .prompt { color: var(--accent); }
+
+    .decode-body { padding: 1.25rem; }
+
+    .decode-step {
+      margin-bottom: 1.75rem;
+      padding-bottom: 1.75rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .decode-step:last-child {
+      margin-bottom: 0;
+      padding-bottom: 0;
+      border-bottom: none;
+    }
+
+    .step-header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.65rem;
+      margin-bottom: 0.85rem;
+    }
+
+    .step-badge {
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      font-weight: 600;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      padding: 0.2rem 0.55rem;
+      border-radius: 6px;
+      color: var(--accent);
+    }
+
+    .step-note {
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+
+    .beam-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 0.55rem;
+    }
+
+    .beam-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 0.75rem;
+      align-items: center;
+      padding: 0.65rem 0.85rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      font-family: var(--mono);
+      font-size: 0.84rem;
+    }
+
+    .beam-row.kept {
+      border-color: var(--green);
+      background: var(--green-dim);
+    }
+
+    .beam-row.pruned {
+      opacity: 0.38;
+      text-decoration: line-through;
+    }
+
+    .beam-row.expanded {
+      border-color: var(--accent);
+      background: #6c9eff12;
+    }
+
+    .token { color: var(--text); }
+    .token.new { color: var(--accent); font-weight: 600; }
+    .token.partial { color: var(--purple); }
+    .token.boundary { border-bottom: 2px dotted var(--teal); }
+
+    .beam-scores {
+      text-align: right;
+      font-size: 0.78rem;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .beam-scores strong { color: var(--green); }
+    .beam-scores .kvl { color: var(--teal); }
+
+    .arrow-down {
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.75rem;
+      padding: 0.35rem 0;
+    }
+
+    /* Data structure */
+    .struct-block {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem;
+      overflow-x: auto;
+    }
+
+    pre {
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      line-height: 1.55;
+      color: #b8bfd4;
+      white-space: pre;
+    }
+
+    .comment { color: #6b7280; }
+    .kw { color: var(--purple); }
+    .type { color: var(--teal); }
+    .field { color: var(--accent); }
+
+    /* Scoring box */
+    .formula-box {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--teal);
+      border-radius: 8px;
+      padding: 1rem 1.15rem;
+      margin: 1rem 0;
+      font-family: var(--mono);
+      font-size: 0.88rem;
+      color: #d1d5e4;
+    }
+
+    .options-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 0.85rem;
+      margin-top: 1rem;
+    }
+
+    .option-card {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.85rem 1rem;
+    }
+
+    .option-card h5 {
+      font-size: 0.85rem;
+      margin-bottom: 0.35rem;
+      color: var(--text);
+    }
+
+    .option-card p {
+      font-size: 0.82rem;
+      margin: 0;
+      color: var(--muted);
+    }
+
+    /* Comparison table */
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--surface);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.88rem;
+    }
+
+    th, td {
+      padding: 0.75rem 1rem;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+
+    th {
+      background: var(--surface-2);
+      color: var(--muted);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 600;
+    }
+
+    tr:last-child td { border-bottom: none; }
+    td { color: #c4c9d8; }
+
+    .yes { color: var(--green); font-weight: 600; }
+    .no  { color: var(--red); opacity: 0.85; }
+    .partial { color: var(--amber); }
+
+    /* Limitations */
+    .limit-list {
+      display: grid;
+      gap: 0.75rem;
+    }
+
+    .limit-item {
+      display: flex;
+      gap: 0.85rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem 1.15rem;
+    }
+
+    .limit-icon {
+      flex-shrink: 0;
+      width: 2rem;
+      height: 2rem;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1rem;
+      background: var(--red-dim);
+    }
+
+    .limit-item h4 {
+      font-size: 0.92rem;
+      margin-bottom: 0.25rem;
+    }
+
+    .limit-item p {
+      font-size: 0.85rem;
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .footnote {
+      margin-top: 2.5rem;
+      padding-top: 1.25rem;
+      border-top: 1px solid var(--border);
+      font-size: 0.82rem;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    @media (max-width: 640px) {
+      .beam-row { grid-template-columns: 1fr; }
+      .beam-scores { text-align: left; }
+    }
+  </style>
+</head>
+<body>
+
+  <header class="hero">
+    <span class="status-badge">Proposed — not yet implemented</span>
+    <h1>KVL-Scored Real Beam Search</h1>
+    <p class="subtitle">
+      Token-by-token beam search that ranks partial hypotheses by learner vocabulary difficulty
+      (KVL/GLMM scores) instead of post-hoc A1-ratio reranking over independent samples.
+      Designed for CEFR A1 English evaluation in <code>SLMs-experiments</code>.
+    </p>
+  </header>
+
+  <main class="container">
+
+    <!-- 1. Intro -->
+    <section id="intro">
+      <h2>Current vs Proposed</h2>
+      <p>
+        The project evaluates small language models on whether they produce A1-appropriate English
+        for learners. Today’s <code>phase2 beam</code> command uses
+        <code>BeamSearchGenerator</code> in <code>src/slm_experiments/models/beam.py</code> — but
+        despite the name, it is <em>not</em> real beam search. It draws <strong>N independent
+        full-length samples</strong> (best-of-N), then reranks finished answers by A1 vocabulary
+        ratio or cumulative log probability.
+      </p>
+      <p>
+        The proposed <strong>KVL beam decoder</strong> performs genuine beam search: at each token
+        step it expands the top-<em>k</em> logits for each active hypothesis, keeps the best
+        <em>W</em> partial sequences ranked by a running mean GLMM score from
+        <code>KvlLookup</code>, and only evaluates KVL when a content word completes at a word
+        boundary. This mirrors the manual llama.cpp eval loop planned for guided decoding in
+        <code>docs/guided-decoding.md</code>, but optimizes for continuous difficulty scores rather
+        than a binary A1 token filter.
+      </p>
+
+      <div class="compare-cards">
+        <div class="card current">
+          <span class="tag amber">Current — phase2 beam</span>
+          <h4>Best-of-N + post-hoc rerank</h4>
+          <ul>
+            <li>Generate N complete answers independently</li>
+            <li>Score finished text with A1-ratio or logprob</li>
+            <li>No interaction between samples during decoding</li>
+            <li>One-shot <code>llm(prompt, max_tokens=…)</code> per sample</li>
+          </ul>
+        </div>
+        <div class="card proposed">
+          <span class="tag blue">Proposed — KVL beam</span>
+          <h4>Token-by-token beam search</h4>
+          <ul>
+            <li>Maintain W partial hypotheses in parallel</li>
+            <li>Update KVL running mean at word boundaries</li>
+            <li>Prune to top-W by KVL score (+ logprob tiebreak)</li>
+            <li>Manual eval loop via llama.cpp (like guided decoding)</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. End-to-end flow -->
+    <section id="flow">
+      <h2>End-to-End Flow</h2>
+      <p>
+        From CLI invocation through evaluation. KVL metrics on the final answer reuse the existing
+        <code>compute_kvl_metrics</code> path for reporting; the decoder uses the same lookup at
+        decode time for pruning.
+      </p>
+
+      <div class="flow-diagram">
+        <svg viewBox="0 0 860 420" width="860" height="420" xmlns="http://www.w3.org/2000/svg" aria-label="End-to-end KVL beam flow">
+          <defs>
+            <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+              <path d="M0,0 L7,3 L0,6 Z" fill="#6c9eff"/>
+            </marker>
+            <linearGradient id="boxGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stop-color="#2c3142"/>
+              <stop offset="100%" stop-color="#242836"/>
+            </linearGradient>
+          </defs>
+
+          <!-- Row 1: CLI → Runner -->
+          <rect x="20" y="30" width="130" height="52" rx="8" fill="url(#boxGrad)" stroke="#2e3345"/>
+          <text x="85" y="52" text-anchor="middle" fill="#e8eaf0" font-size="12" font-weight="600" font-family="system-ui">CLI</text>
+          <text x="85" y="68" text-anchor="middle" fill="#8b92a8" font-size="10" font-family="ui-monospace">phase2 kvl-beam</text>
+
+          <line x1="150" y1="56" x2="185" y2="56" stroke="#6c9eff" stroke-width="2" marker-end="url(#arrow)"/>
+
+          <rect x="190" y="30" width="160" height="52" rx="8" fill="url(#boxGrad)" stroke="#2e3345"/>
+          <text x="270" y="52" text-anchor="middle" fill="#e8eaf0" font-size="12" font-weight="600" font-family="system-ui">KvlBeamSweepRunner</text>
+          <text x="270" y="68" text-anchor="middle" fill="#8b92a8" font-size="10" font-family="ui-monospace">phase2/kvl_beam.py</text>
+
+          <line x1="350" y1="56" x2="385" y2="56" stroke="#6c9eff" stroke-width="2" marker-end="url(#arrow)"/>
+
+          <rect x="390" y="30" width="150" height="52" rx="8" fill="url(#boxGrad)" stroke="#2e3345"/>
+          <text x="465" y="52" text-anchor="middle" fill="#e8eaf0" font-size="12" font-weight="600" font-family="system-ui">ExperimentPipeline</text>
+          <text x="465" y="68" text-anchor="middle" fill="#8b92a8" font-size="10" font-family="ui-monospace">run_kvl_beam()</text>
+
+          <line x1="540" y1="56" x2="575" y2="56" stroke="#6c9eff" stroke-width="2" marker-end="url(#arrow)"/>
+
+          <rect x="580" y="30" width="160" height="52" rx="8" fill="url(#boxGrad)" stroke="#2e3345"/>
+          <text x="660" y="52" text-anchor="middle" fill="#e8eaf0" font-size="12" font-weight="600" font-family="system-ui">LlamaCppWrapper</text>
+          <text x="660" y="68" text-anchor="middle" fill="#8b92a8" font-size="10" font-family="ui-monospace">generate_kvl_beam()</text>
+
+          <!-- Down to decoder -->
+          <line x1="660" y1="82" x2="660" y2="115" stroke="#6c9eff" stroke-width="2" marker-end="url(#arrow)"/>
+
+          <!-- Decode loop box -->
+          <rect x="480" y="120" width="360" height="130" rx="12" fill="#1a2840" stroke="#4a7ad4" stroke-width="1.5"/>
+          <text x="660" y="145" text-anchor="middle" fill="#6c9eff" font-size="11" font-weight="600" font-family="system-ui" letter-spacing="1">DECODE LOOP (per token step)</text>
+
+          <rect x="500" y="158" width="150" height="36" rx="6" fill="#242836" stroke="#2e3345"/>
+          <text x="575" y="180" text-anchor="middle" fill="#c4c9d8" font-size="10" font-family="ui-monospace">eval → logits</text>
+
+          <line x1="650" y1="176" x2="670" y2="176" stroke="#6c9eff" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+          <rect x="675" y="158" width="150" height="36" rx="6" fill="#242836" stroke="#2e3345"/>
+          <text x="750" y="180" text-anchor="middle" fill="#c4c9d8" font-size="10" font-family="ui-monospace">expand top-k × W</text>
+
+          <rect x="500" y="204" width="150" height="36" rx="6" fill="#242836" stroke="#2e3345"/>
+          <text x="575" y="226" text-anchor="middle" fill="#2dd4bf" font-size="10" font-family="ui-monospace">KVL @ word boundary</text>
+
+          <line x1="650" y1="222" x2="670" y2="222" stroke="#6c9eff" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+          <rect x="675" y="204" width="150" height="36" rx="6" fill="#242836" stroke="#2e3345"/>
+          <text x="750" y="226" text-anchor="middle" fill="#4ade80" font-size="10" font-family="ui-monospace">keep top W beams</text>
+
+          <!-- KvlLookup sidecar -->
+          <rect x="20" y="155" width="150" height="60" rx="8" fill="#1a3028" stroke="#2dd4bf" stroke-width="1.5"/>
+          <text x="95" y="180" text-anchor="middle" fill="#2dd4bf" font-size="12" font-weight="600" font-family="system-ui">KvlLookup</text>
+          <text x="95" y="198" text-anchor="middle" fill="#8b92a8" font-size="10" font-family="ui-monospace">kvl_lookup_es.json</text>
+
+          <line x1="170" y1="185" x2="478" y2="222" stroke="#2dd4bf" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+
+          <!-- Down to eval -->
+          <line x1="660" y1="250" x2="660" y2="285" stroke="#6c9eff" stroke-width="2" marker-end="url(#arrow)"/>
+
+          <rect x="530" y="290" width="260" height="52" rx="8" fill="url(#boxGrad)" stroke="#2e3345"/>
+          <text x="660" y="312" text-anchor="middle" fill="#e8eaf0" font-size="12" font-weight="600" font-family="system-ui">TextEvaluator + compute_kvl_metrics</text>
+          <text x="660" y="328" text-anchor="middle" fill="#8b92a8" font-size="10" font-family="ui-monospace">FK, Fog, Spache, meets_a1_criteria</text>
+
+          <line x1="660" y1="342" x2="660" y2="365" stroke="#6c9eff" stroke-width="2" marker-end="url(#arrow)"/>
+
+          <rect x="555" y="370" width="210" height="40" rx="8" fill="#242836" stroke="#4ade80"/>
+          <text x="660" y="395" text-anchor="middle" fill="#4ade80" font-size="11" font-weight="600" font-family="system-ui">RunStore → summary.json</text>
+
+          <!-- Left: config -->
+          <rect x="20" y="290" width="200" height="52" rx="8" fill="url(#boxGrad)" stroke="#2e3345"/>
+          <text x="120" y="312" text-anchor="middle" fill="#e8eaf0" font-size="12" font-weight="600" font-family="system-ui">ExperimentConfig</text>
+          <text x="120" y="328" text-anchor="middle" fill="#8b92a8" font-size="10" font-family="ui-monospace">beam_width, kvl_l1, top_k</text>
+
+          <line x1="220" y1="316" x2="528" y2="316" stroke="#6c9eff" stroke-width="1.5" stroke-dasharray="4,3"/>
+        </svg>
+      </div>
+    </section>
+
+    <!-- 3. Toy example -->
+    <section id="example">
+      <h2>Decode Loop — Toy Example</h2>
+      <p>
+        Prompt: <strong>“What is a friend?”</strong> · Beam width <em>W = 2</em> · Expand top 3
+        logits per beam · L1 = Spanish (<code>es</code>) · Higher GLMM = easier for the learner.
+        BPE tokens shown in brackets; KVL updates only when a content word completes (space or
+        punctuation boundary).
+      </p>
+
+      <div class="decode-panel">
+        <div class="prompt-bar">
+          <span class="label">Prompt →</span>
+          <span class="prompt">"What is a friend?"</span>
+          <span class="label" style="margin-left:1rem">| beam_width=2, kvl_l1=es</span>
+        </div>
+
+        <div class="decode-body">
+
+          <!-- Step 1 -->
+          <div class="decode-step">
+            <div class="step-header">
+              <span class="step-badge">Step 1</span>
+              <span class="step-note">First generated token — no complete content word yet, rank by logprob only</span>
+            </div>
+            <div class="beam-grid">
+              <div class="beam-row kept expanded">
+                <span><span class="token new">A</span> <span class="token partial">[id:320]</span></span>
+                <span class="beam-scores">logprob <strong>−0.18</strong> · KVL <span class="kvl">—</span></span>
+              </div>
+              <div class="beam-row kept expanded">
+                <span><span class="token new">Friend</span> <span class="token partial">[id:4582]</span></span>
+                <span class="beam-scores">logprob <strong>−0.41</strong> · KVL <span class="kvl">—</span></span>
+              </div>
+              <div class="beam-row pruned">
+                <span><span class="token new">Someone</span> <span class="token partial">[id:8721]</span></span>
+                <span class="beam-scores">logprob −0.55 · pruned</span>
+              </div>
+            </div>
+            <div class="arrow-down">↓ keep top 2 by logprob (no KVL scores yet)</div>
+          </div>
+
+          <!-- Step 2 -->
+          <div class="decode-step">
+            <div class="step-header">
+              <span class="step-badge">Step 2</span>
+              <span class="step-note">Expand each beam · “friend” completes on beam A → KVL lookup fires</span>
+            </div>
+            <p style="font-size:0.82rem;color:var(--muted);margin-bottom:0.65rem">Expansions from beam <em>A</em>:</p>
+            <div class="beam-grid" style="margin-bottom:0.75rem">
+              <div class="beam-row kept">
+                <span>A <span class="token new boundary">friend</span> <span class="token partial">[id:4582]</span></span>
+                <span class="beam-scores"><span class="kvl">KVL 3.25</span> · logprob −0.31</span>
+              </div>
+              <div class="beam-row pruned">
+                <span>A <span class="token new">person</span> <span class="token partial">[id:1290]</span></span>
+                <span class="beam-scores"><span class="kvl">KVL 1.65</span> · logprob −0.38</span>
+              </div>
+              <div class="beam-row pruned">
+                <span>A <span class="token new">good</span> <span class="token partial">[id:920]</span></span>
+                <span class="beam-scores"><span class="kvl">KVL 2.83</span> · logprob −0.44</span>
+              </div>
+            </div>
+            <p style="font-size:0.82rem;color:var(--muted);margin-bottom:0.65rem">Expansions from beam <em>Friend</em>:</p>
+            <div class="beam-grid">
+              <div class="beam-row kept">
+                <span>Friend <span class="token new">is</span> <span class="token partial">[id:338]</span></span>
+                <span class="beam-scores">KVL <span class="kvl">3.25</span> · logprob −0.52</span>
+              </div>
+              <div class="beam-row pruned">
+                <span>Friend <span class="token new">means</span> <span class="token partial">[id:5021]</span></span>
+                <span class="beam-scores">KVL 3.25 · logprob −0.61</span>
+              </div>
+            </div>
+            <div class="arrow-down">↓ keep top 2 by KVL mean (tiebreak: logprob) → <strong>A friend</strong> and <strong>Friend is</strong></div>
+          </div>
+
+          <!-- Step 3 -->
+          <div class="decode-step">
+            <div class="step-header">
+              <span class="step-badge">Step 3</span>
+              <span class="step-note">Multi-token word “someone” spans two BPE tokens — KVL deferred until boundary</span>
+            </div>
+            <div class="beam-grid">
+              <div class="beam-row kept expanded">
+                <span>A friend <span class="token new">is</span> <span class="token partial">[id:338]</span></span>
+                <span class="beam-scores"><span class="kvl">KVL 3.25</span> · logprob −0.48</span>
+              </div>
+              <div class="beam-row kept">
+                <span>A friend <span class="token new">some</span><span class="token partial">[id:991]</span></span>
+                <span class="beam-scores">KVL 3.25 · logprob −0.55 · <em style="color:var(--purple)">partial word</em></span>
+              </div>
+              <div class="beam-row pruned">
+                <span>Friend is <span class="token new">a</span> <span class="token partial">[id:264]</span></span>
+                <span class="beam-scores">KVL 3.25 · logprob −0.57</span>
+              </div>
+              <div class="beam-row pruned">
+                <span>Friend is <span class="token new">some</span><span class="token partial">[id:991]</span></span>
+                <span class="beam-scores">KVL 3.25 · logprob −0.59 · partial</span>
+              </div>
+            </div>
+            <div class="arrow-down">↓ continue until stop token or max_tokens → final: <strong>“A friend is someone you like.”</strong></div>
+          </div>
+
+        </div>
+      </div>
+
+      <p style="margin-top:1rem;font-size:0.88rem;color:var(--muted)">
+        At step 3, <code>some</code> + <code>one</code> are separate BPE pieces. The decoder tracks
+        a <em>pending word buffer</em> and only calls <code>KvlLookup.get_score("someone")</code>
+        once the full lemma is confirmed by a trailing space — score 2.21, updating the running mean.
+      </p>
+    </section>
+
+    <!-- 4. Beam state -->
+    <section id="beam-state">
+      <h2>Beam State Data Structure</h2>
+      <p>
+        Each active hypothesis is a <code>KvlBeamCandidate</code>. Unlike the current
+        <code>BeamCandidate</code> (token IDs + text only), KVL beam tracks partial-word state and
+        incremental difficulty scores.
+      </p>
+
+      <div class="struct-block">
+<pre><span class="kw">@dataclass</span>
+<span class="kw">class</span> <span class="type">KvlBeamCandidate</span>:
+    <span class="field">token_ids</span>: <span class="type">list</span>[<span class="type">int</span>]           <span class="comment"># full sequence including prompt continuation</span>
+    <span class="field">text</span>: <span class="type">str</span>                      <span class="comment"># decoded UTF-8 so far</span>
+    <span class="field">cumulative_logprob</span>: <span class="type">float</span>      <span class="comment"># sum of log P(token | context)</span>
+    <span class="field">pending_word</span>: <span class="type">str</span>              <span class="comment"># incomplete BPE word being assembled</span>
+    <span class="field">completed_content_words</span>: <span class="type">list</span>[<span class="type">str</span>]  <span class="comment"># lemmatized/cleaned words scored so far</span>
+    <span class="field">kvl_scores</span>: <span class="type">list</span>[<span class="type">float</span>]         <span class="comment"># GLMM score per completed content word</span>
+    <span class="field">finished</span>: <span class="type">bool</span>                 <span class="comment"># hit stop sequence or max length</span>
+
+<span class="kw">@dataclass</span>
+<span class="kw">class</span> <span class="type">KvlBeamState</span>:
+    <span class="field">beams</span>: <span class="type">list</span>[<span class="type">KvlBeamCandidate</span>]  <span class="comment"># current top-W hypotheses</span>
+    <span class="field">beam_width</span>: <span class="type">int</span>                <span class="comment"># W — number kept after each step</span>
+    <span class="field">expand_top_k</span>: <span class="type">int</span>              <span class="comment"># logits considered per beam per step</span>
+    <span class="field">step</span>: <span class="type">int</span>                      <span class="comment"># decode step counter</span></pre>
+      </div>
+
+      <p>
+        After each expansion, all candidate children are scored, sorted by
+        <code>kvl_running_mean()</code> (descending), then by <code>cumulative_logprob</code>, and
+        truncated to <code>beam_width</code>. Finished beams remain in a separate pool and compete
+        for the final selection.
+      </p>
+    </section>
+
+    <!-- 5. Scoring -->
+    <section id="scoring">
+      <h2>Scoring Function</h2>
+      <p>
+        KVL beam ranks partial hypotheses by the same aggregate the evaluation pipeline reports:
+        mean GLMM score over looked-up content words. Function words are excluded via the existing
+        <code>TextEvaluator.extract_content_words()</code> logic.
+      </p>
+
+      <div class="formula-box">
+        kvl_running_mean = Σ scores(w<sub>i</sub>) / |{ w<sub>i</sub> : lookup(w<sub>i</sub>) ≠ None }|
+        <br><br>
+        rank(beam) = (kvl_running_mean, cumulative_logprob)   <span style="color:#6b7280"># lexicographic, both descending</span>
+      </div>
+
+      <h3>OOV handling options</h3>
+      <div class="options-grid">
+        <div class="option-card">
+          <h5>Exclude (default)</h5>
+          <p>OOV words do not enter the mean denominator — matches <code>compute_kvl_metrics</code> v1 behavior. Beams with more known easy words rank higher.</p>
+        </div>
+        <div class="option-card">
+          <h5>Penalty constant</h5>
+          <p>Assign OOV words a fixed score (e.g. −3.0, below <code>KVL_HARD_THRESHOLD</code> = −1.0) so unknown words actively hurt the beam.</p>
+        </div>
+        <div class="option-card">
+          <h5>Coverage gate</h5>
+          <p>Require <code>lookup_coverage ≥ 0.5</code> before KVL ranking applies; otherwise fall back to logprob-only until enough words are scored.</p>
+        </div>
+      </div>
+
+      <h3 style="margin-top:1.25rem">Logprob tiebreaker</h3>
+      <p>
+        When two beams share the same running KVL mean (common early in decoding), break ties with
+        <code>cumulative_logprob</code> so the model’s natural language prior still matters. Optional
+        length normalization: divide logprob by <code>len(token_ids) ** length_penalty</code> to
+        discourage overly long easy-word chains.
+      </p>
+    </section>
+
+    <!-- 6. Architecture -->
+    <section id="architecture">
+      <h2>Architecture — Component Integration</h2>
+      <p>Proposed module layout, following the same thin-runner pattern as <code>phase2/beam.py</code> and the planned guided decoding stack.</p>
+
+      <div class="arch-diagram">
+        <svg viewBox="0 0 820 340" width="820" height="340" xmlns="http://www.w3.org/2000/svg" aria-label="Architecture diagram">
+          <defs>
+            <marker id="arr2" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+              <path d="M0,0 L7,3 L0,6 Z" fill="#8b92a8"/>
+            </marker>
+          </defs>
+
+          <!-- Layer labels -->
+          <text x="10" y="22" fill="#6b7280" font-size="10" font-family="system-ui" font-weight="600">ENTRY</text>
+          <text x="10" y="102" fill="#6b7280" font-size="10" font-family="system-ui" font-weight="600">ORCHESTRATION</text>
+          <text x="10" y="182" fill="#6b7280" font-size="10" font-family="system-ui" font-weight="600">INFERENCE</text>
+          <text x="10" y="262" fill="#6b7280" font-size="10" font-family="system-ui" font-weight="600">DATA</text>
+
+          <!-- Row 1 -->
+          <rect x="80" y="8" width="120" height="44" rx="6" fill="#242836" stroke="#2e3345"/>
+          <text x="140" y="35" text-anchor="middle" fill="#e8eaf0" font-size="11" font-family="ui-monospace">cli.py</text>
+
+          <line x1="200" y1="30" x2="230" y2="30" stroke="#8b92a8" marker-end="url(#arr2)"/>
+
+          <rect x="235" y="8" width="155" height="44" rx="6" fill="#242836" stroke="#fbbf24"/>
+          <text x="312" y="28" text-anchor="middle" fill="#fbbf24" font-size="10" font-weight="600" font-family="system-ui">phase2/kvl_beam.py</text>
+          <text x="312" y="42" text-anchor="middle" fill="#8b92a8" font-size="9" font-family="ui-monospace">KvlBeamSweepRunner</text>
+
+          <!-- Row 2 -->
+          <rect x="80" y="88" width="140" height="44" rx="6" fill="#242836" stroke="#2e3345"/>
+          <text x="150" y="108" text-anchor="middle" fill="#e8eaf0" font-size="10" font-family="ui-monospace">core/config.py</text>
+          <text x="150" y="122" text-anchor="middle" fill="#8b92a8" font-size="9" font-family="ui-monospace">config_kvl_beam, kvl_l1</text>
+
+          <rect x="260" y="88" width="155" height="44" rx="6" fill="#242836" stroke="#6c9eff"/>
+          <text x="337" y="108" text-anchor="middle" fill="#6c9eff" font-size="10" font-weight="600" font-family="system-ui">core/pipeline.py</text>
+          <text x="337" y="122" text-anchor="middle" fill="#8b92a8" font-size="9" font-family="ui-monospace">run_kvl_beam()</text>
+
+          <rect x="455" y="88" width="140" height="44" rx="6" fill="#242836" stroke="#2e3345"/>
+          <text x="525" y="108" text-anchor="middle" fill="#e8eaf0" font-size="10" font-family="ui-monospace">core/result.py</text>
+          <text x="525" y="122" text-anchor="middle" fill="#8b92a8" font-size="9" font-family="ui-monospace">kvl_beam_* fields</text>
+
+          <rect x="635" y="88" width="155" height="44" rx="6" fill="#242836" stroke="#2e3345"/>
+          <text x="712" y="108" text-anchor="middle" fill="#e8eaf0" font-size="10" font-family="ui-monospace">core/run_store.py</text>
+          <text x="712" y="122" text-anchor="middle" fill="#8b92a8" font-size="9" font-family="ui-monospace">by_kvl_beam_width</text>
+
+          <!-- Row 3 -->
+          <rect x="80" y="168" width="175" height="44" rx="6" fill="#242836" stroke="#6c9eff"/>
+          <text x="167" y="188" text-anchor="middle" fill="#6c9eff" font-size="10" font-weight="600" font-family="system-ui">models/llamacpp.py</text>
+          <text x="167" y="202" text-anchor="middle" fill="#8b92a8" font-size="9" font-family="ui-monospace">generate_kvl_beam()</text>
+
+          <line x1="255" y1="190" x2="285" y2="190" stroke="#8b92a8" marker-end="url(#arr2)"/>
+
+          <rect x="290" y="168" width="190" height="44" rx="6" fill="#1a2840" stroke="#4a7ad4" stroke-width="1.5"/>
+          <text x="385" y="188" text-anchor="middle" fill="#6c9eff" font-size="10" font-weight="600" font-family="system-ui">models/kvl_beam_decoder.py</text>
+          <text x="385" y="202" text-anchor="middle" fill="#8b92a8" font-size="9" font-family="ui-monospace">KvlBeamDecoder.decode()</text>
+
+          <line x1="480" y1="190" x2="510" y2="190" stroke="#8b92a8" marker-end="url(#arr2)"/>
+
+          <rect x="515" y="168" width="175" height="44" rx="6" fill="#242836" stroke="#2e3345"/>
+          <text x="602" y="188" text-anchor="middle" fill="#e8eaf0" font-size="10" font-family="ui-monospace">models/word_tracker.py</text>
+          <text x="602" y="202" text-anchor="middle" fill="#8b92a8" font-size="9" font-family="ui-monospace">BPE → word boundaries</text>
+
+          <!-- Row 4 -->
+          <rect x="290" y="248" width="190" height="44" rx="6" fill="#1a3028" stroke="#2dd4bf" stroke-width="1.5"/>
+          <text x="385" y="268" text-anchor="middle" fill="#2dd4bf" font-size="10" font-weight="600" font-family="system-ui">evaluation/kvl.py</text>
+          <text x="385" y="282" text-anchor="middle" fill="#8b92a8" font-size="9" font-family="ui-monospace">KvlLookup · compute_kvl_metrics</text>
+
+          <rect x="515" y="248" width="220" height="44" rx="6" fill="#1a3028" stroke="#2dd4bf" stroke-width="1.5"/>
+          <text x="625" y="268" text-anchor="middle" fill="#2dd4bf" font-size="10" font-weight="600" font-family="system-ui">data/kvl/kvl_lookup_es.json</text>
+          <text x="625" y="282" text-anchor="middle" fill="#8b92a8" font-size="9" font-family="ui-monospace">~6,847 lemmas · GLMM −6…+5</text>
+
+          <!-- Vertical connectors -->
+          <line x1="312" y1="52" x2="337" y2="88" stroke="#8b92a8" stroke-dasharray="3,3" marker-end="url(#arr2)"/>
+          <line x1="337" y1="132" x2="167" y2="168" stroke="#8b92a8" stroke-dasharray="3,3" marker-end="url(#arr2)"/>
+          <line x1="385" y1="212" x2="385" y2="248" stroke="#2dd4bf" marker-end="url(#arr2)"/>
+          <line x1="480" y1="272" x2="513" y2="272" stroke="#2dd4bf" marker-end="url(#arr2)"/>
+        </svg>
+      </div>
+    </section>
+
+    <!-- 7. Comparison table -->
+    <section id="comparison">
+      <h2>Intervention Comparison</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Approach</th>
+              <th>When it acts</th>
+              <th>Scoring signal</th>
+              <th>Search strategy</th>
+              <th>Token loop?</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Best-of-N beam</strong><br><code>phase2 beam</code></td>
+              <td>After full generation</td>
+              <td>A1-ratio or logprob on finished text</td>
+              <td>N independent samples, pick best</td>
+              <td><span class="no">No</span></td>
+              <td>Implemented</td>
+            </tr>
+            <tr>
+              <td><strong>KVL beam</strong><br><code>phase2 kvl-beam</code></td>
+              <td>Every token step</td>
+              <td>Running mean GLMM (KVL lookup)</td>
+              <td>Real beam search, width W</td>
+              <td><span class="yes">Yes</span></td>
+              <td>Proposed</td>
+            </tr>
+            <tr>
+              <td><strong>Guided decoding</strong><br><code>phase2 guided</code></td>
+              <td>Every token step</td>
+              <td>Binary A1 token filter in top-K pool</td>
+              <td>Greedy + A1 override</td>
+              <td><span class="yes">Yes</span></td>
+              <td>Planned</td>
+            </tr>
+            <tr>
+              <td><strong>Logit bias</strong><br><code>phase1 weighting</code></td>
+              <td>Every token step</td>
+              <td>Soft boost to A1 token logits</td>
+              <td>Standard sampling / greedy</td>
+              <td><span class="partial">Indirect</span></td>
+              <td>Implemented</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 8. Limitations -->
+    <section id="limitations">
+      <h2>Known Limitations</h2>
+      <div class="limit-list">
+        <div class="limit-item">
+          <div class="limit-icon">📖</div>
+          <div>
+            <h4>Lemma-only lookup</h4>
+            <p>
+              <code>KvlLookup</code> keys are lowercased surface lemmas (~6.8k words). Inflected forms
+              like “friends” or “running” are OOV unless they appear in the lookup. v1 excludes OOV
+              from the running mean, which can inflate scores for beams that avoid inflection.
+            </p>
+          </div>
+        </div>
+        <div class="limit-item">
+          <div class="limit-icon">🧩</div>
+          <div>
+            <h4>Tokens ≠ words (BPE subwords)</h4>
+            <p>
+              Decoding is token-level; KVL is word-level. A content word may span multiple BPE
+              tokens (“some” + “one”), and a single token may prefix multiple words (“run” in
+              “run”, “running”, “runner”). A <code>word_tracker</code> module must buffer partial
+              tokens and detect boundaries — same core problem as guided decoding’s
+              <code>A1TokenIndex</code>.
+            </p>
+          </div>
+        </div>
+        <div class="limit-item">
+          <div class="limit-icon">⚡</div>
+          <div>
+            <h4>Compute cost</h4>
+            <p>
+              Real beam search with width W and expand-top-k requires O(W × k) forward passes per
+              token — far more expensive than one-shot generation or best-of-N. A W=4, k=10 decode
+              of 100 tokens ≈ 4,000 eval steps vs. ~100 for greedy. Practical sweeps need smaller
+              grids than the current beam width sweep.
+            </p>
+          </div>
+        </div>
+        <div class="limit-item">
+          <div class="limit-icon">🎯</div>
+          <div>
+            <h4>Proxy vs. pass criteria</h4>
+            <p>
+              KVL GLMM scores measure estimated learner <em>receptive</em> knowledge, not whether
+              output meets A1 readability thresholds (FK ≤ 5, Fog ≤ 6, Spache ≤ 4). Optimizing KVL
+              during decode may not monotonically improve <code>meets_a1_criteria</code> — empirical
+              comparison against best-of-N and guided decoding is required.
+            </p>
+          </div>
+        </div>
+        <div class="limit-item">
+          <div class="limit-icon">🔧</div>
+          <div>
+            <h4>llama.cpp manual eval loop</h4>
+            <p>
+              Current wrappers use one-shot <code>llm(prompt, max_tokens=…)</code>. KVL beam requires
+              a new per-step eval API (as planned for <code>ConstrainedDecoder</code>). This is the
+              highest-risk integration point and should be spiked on one GGUF model before a full
+              sweep.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <p class="footnote">
+      SLMs-experiments · KVL beam design doc ·
+      Related: <code>docs/beam-search.html</code>, <code>docs/guided-decoding.md</code>,
+      <code>data/kvl/README.md</code>
+    </p>
+
+  </main>
+
+</body>
+</html>

@@ -2,6 +2,8 @@
 
 How each inference-time intervention works in code. All three operate at generation time without model fine-tuning.
 
+A fourth intervention — **top-k A1-guided decoding** — is designed but not yet implemented. See [guided-decoding.md](guided-decoding.md).
+
 ## 1. Probability Weighting (Logit Bias)
 
 Increases the probability of A1-level vocabulary tokens during autoregressive decoding.
