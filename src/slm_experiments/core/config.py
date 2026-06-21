@@ -27,6 +27,8 @@ class ExperimentConfig:
     experiment_name: str = "default_experiment"
     description: str = ""
 
+    kvl_l1: str = "es"
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for storage."""
         return asdict(self)

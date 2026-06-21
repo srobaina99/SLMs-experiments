@@ -42,6 +42,15 @@ class ExperimentResult:
     token_count: Optional[int] = None
     difficult_words: int = 0
 
+    kvl_l1: str = "es"
+    kvl_content_word_count: int = 0
+    kvl_lookup_count: int = 0
+    kvl_oov_count: int = 0
+    kvl_lookup_coverage: float = 0.0
+    kvl_mean_score: Optional[float] = None
+    kvl_min_score: Optional[float] = None
+    kvl_pct_hard_words: Optional[float] = None
+
     cleaned_response: str = ""
 
     beam_selection_method: Optional[str] = None
@@ -67,11 +76,13 @@ class ExperimentResult:
         cleaned_response: str = "",
         generation_successful: bool = True,
         meets_a1_criteria: bool = False,
+        kvl_metrics: Optional[Dict[str, Any]] = None,
     ) -> "ExperimentResult":
         """Create ExperimentResult from response data and metrics."""
         grade_indices = text_metrics.get("grade_level_indices", {})
         readability_scores = text_metrics.get("readability_scores", {})
         text_stats = text_metrics.get("text_statistics", {})
+        kvl = kvl_metrics or {}
 
         return cls(
             experiment_id=str(uuid.uuid4()),
@@ -98,6 +109,14 @@ class ExperimentResult:
             word_count=text_stats.get("word_count", 0),
             token_count=text_stats.get("token_count"),
             difficult_words=text_stats.get("difficult_words", 0),
+            kvl_l1=str(kvl.get("kvl_l1", config.kvl_l1)),
+            kvl_content_word_count=int(kvl.get("kvl_content_word_count", 0)),
+            kvl_lookup_count=int(kvl.get("kvl_lookup_count", 0)),
+            kvl_oov_count=int(kvl.get("kvl_oov_count", 0)),
+            kvl_lookup_coverage=float(kvl.get("kvl_lookup_coverage", 0.0)),
+            kvl_mean_score=kvl.get("kvl_mean_score"),
+            kvl_min_score=kvl.get("kvl_min_score"),
+            kvl_pct_hard_words=kvl.get("kvl_pct_hard_words"),
         )
 
     @classmethod
@@ -112,6 +131,7 @@ class ExperimentResult:
         cleaned_response: str = "",
         generation_successful: bool = True,
         meets_a1_criteria: bool = False,
+        kvl_metrics: Optional[Dict[str, Any]] = None,
         beam_selection_method: str = "a1_ratio",
         beam_a1_ratio: float = 0.0,
         beam_a1_count: int = 0,
@@ -130,6 +150,7 @@ class ExperimentResult:
             cleaned_response=cleaned_response,
             generation_successful=generation_successful,
             meets_a1_criteria=meets_a1_criteria,
+            kvl_metrics=kvl_metrics,
         )
         result.beam_selection_method = beam_selection_method
         result.beam_a1_ratio = beam_a1_ratio

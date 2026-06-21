@@ -32,6 +32,11 @@ NUMERIC_SUMMARY_COLUMNS = [
     "spache_readability",
     "word_count",
     "difficult_words",
+    "kvl_mean_score",
+    "kvl_min_score",
+    "kvl_lookup_coverage",
+    "kvl_oov_count",
+    "kvl_pct_hard_words",
 ]
 
 SWEEP_SUMMARY_SECTIONS = {
