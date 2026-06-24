@@ -1,0 +1,980 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>How Beam Search Works</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface-2: #242836;
+      --border: #2e3345;
+      --text: #e8eaf0;
+      --muted: #8b92a8;
+      --accent: #6c9eff;
+      --accent-dim: #4a7ad4;
+      --green: #4ade80;
+      --green-dim: #22c55e33;
+      --amber: #fbbf24;
+      --amber-dim: #fbbf2433;
+      --red: #f87171;
+      --red-dim: #f8717133;
+      --purple: #c084fc;
+      --pruned: #3a3f52;
+      --font: "Inter", system-ui, -apple-system, sans-serif;
+      --mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    .hero {
+      background: linear-gradient(135deg, #141824 0%, #1a2040 50%, #141824 100%);
+      border-bottom: 1px solid var(--border);
+      padding: 3rem 1.5rem 2.5rem;
+      text-align: center;
+    }
+
+    .hero h1 {
+      font-size: clamp(1.8rem, 4vw, 2.6rem);
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      margin-bottom: 0.75rem;
+    }
+
+    .hero p {
+      color: var(--muted);
+      max-width: 620px;
+      margin: 0 auto;
+      font-size: 1.05rem;
+    }
+
+    .container {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem 4rem;
+    }
+
+    section {
+      margin-bottom: 3rem;
+    }
+
+    h2 {
+      font-size: 1.35rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+      letter-spacing: -0.02em;
+    }
+
+    h3 {
+      font-size: 0.85rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 0.75rem;
+    }
+
+    p, li { color: #c4c9d8; }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem;
+    }
+
+    .card h4 {
+      font-size: 1rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .card.greedy { border-top: 3px solid var(--amber); }
+    .card.beam   { border-top: 3px solid var(--accent); }
+    .card.exhaust { border-top: 3px solid var(--purple); }
+
+    .tag {
+      display: inline-block;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+      margin-bottom: 0.5rem;
+    }
+
+    .tag.amber  { background: var(--amber-dim); color: var(--amber); }
+    .tag.blue   { background: #6c9eff22; color: var(--accent); }
+    .tag.purple { background: #c084fc22; color: var(--purple); }
+
+    /* Interactive demo */
+    .demo-panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      overflow: hidden;
+    }
+
+    .demo-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      align-items: center;
+      padding: 1.25rem 1.5rem;
+      background: var(--surface-2);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .control-group {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+
+    .control-group label {
+      font-size: 0.85rem;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    input[type="range"] {
+      width: 100px;
+      accent-color: var(--accent);
+    }
+
+    .beam-value {
+      font-family: var(--mono);
+      font-size: 0.9rem;
+      color: var(--accent);
+      min-width: 1.5rem;
+    }
+
+    button {
+      font-family: var(--font);
+      font-size: 0.85rem;
+      font-weight: 500;
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    }
+
+    button:hover { background: var(--surface-2); border-color: var(--accent-dim); }
+    button.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #0f1117;
+    }
+    button.primary:hover { background: var(--accent-dim); }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .demo-body { padding: 1.5rem; }
+
+    .prompt-bar {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 1.5rem;
+      font-family: var(--mono);
+      font-size: 0.95rem;
+    }
+
+    .prompt-bar .label { color: var(--muted); }
+    .prompt-bar .prompt { color: var(--accent); }
+
+    .step-indicator {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 1.25rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+
+    .step-dots {
+      display: flex;
+      gap: 0.35rem;
+    }
+
+    .step-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--border);
+      transition: background 0.2s;
+    }
+
+    .step-dot.active { background: var(--accent); }
+    .step-dot.done { background: var(--green); }
+
+    /* Beam tree visualization */
+    .beam-viz {
+      position: relative;
+      min-height: 320px;
+    }
+
+    .beam-step {
+      margin-bottom: 2rem;
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity 0.4s, transform 0.4s;
+    }
+
+    .beam-step.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .beam-step-header {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .step-badge {
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      font-weight: 600;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      padding: 0.2rem 0.6rem;
+      border-radius: 6px;
+      color: var(--accent);
+    }
+
+    .step-desc {
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+
+    .candidates {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .candidate-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 1rem;
+      padding: 0.6rem 0.9rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      transition: border-color 0.3s, background 0.3s, opacity 0.3s;
+    }
+
+    .candidate-row.kept {
+      border-color: var(--green);
+      background: var(--green-dim);
+    }
+
+    .candidate-row.pruned {
+      opacity: 0.35;
+      border-color: transparent;
+      background: transparent;
+      text-decoration: line-through;
+      color: var(--pruned);
+    }
+
+    .candidate-row.expanded {
+      border-color: var(--accent);
+      background: #6c9eff15;
+    }
+
+    .candidate-seq {
+      font-family: var(--mono);
+      font-size: 0.88rem;
+    }
+
+    .candidate-seq .token { color: var(--text); }
+    .candidate-seq .token.new { color: var(--accent); font-weight: 600; }
+    .candidate-seq .token.prompt { color: var(--muted); }
+
+    .candidate-score {
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .candidate-score strong { color: var(--green); }
+
+    .expansion-arrow {
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.75rem;
+      padding: 0.25rem 0;
+    }
+
+    .expansion-group {
+      margin-left: 1.5rem;
+      border-left: 2px solid var(--border);
+      padding-left: 1rem;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1.25rem;
+      margin-top: 1.25rem;
+      padding-top: 1.25rem;
+      border-top: 1px solid var(--border);
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .legend-swatch {
+      width: 12px;
+      height: 12px;
+      border-radius: 3px;
+    }
+
+    /* Algorithm box */
+    .algo-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      line-height: 1.8;
+      overflow-x: auto;
+    }
+
+    .algo-box .kw { color: var(--purple); }
+    .algo-box .fn { color: var(--accent); }
+    .algo-box .cm { color: var(--muted); }
+    .algo-box .num { color: var(--amber); }
+
+    /* Formula */
+    .formula {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem 1.25rem;
+      font-family: var(--mono);
+      font-size: 0.9rem;
+      text-align: center;
+      margin: 1rem 0;
+      color: var(--accent);
+    }
+
+    /* SVG diagram */
+    .diagram-wrap {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      overflow-x: auto;
+    }
+
+    svg text {
+      font-family: var(--font);
+    }
+
+    .final-result {
+      margin-top: 1.5rem;
+      padding: 1rem 1.25rem;
+      background: var(--green-dim);
+      border: 1px solid var(--green);
+      border-radius: 10px;
+      font-family: var(--mono);
+      font-size: 0.95rem;
+      display: none;
+    }
+
+    .final-result.show { display: block; }
+
+    .final-result .label {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--green);
+      margin-bottom: 0.35rem;
+      font-family: var(--font);
+    }
+
+    @media (max-width: 600px) {
+      .demo-controls { flex-direction: column; align-items: stretch; }
+      .control-group { justify-content: space-between; }
+    }
+  </style>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<header class="hero">
+  <h1>How Beam Search Works</h1>
+  <p>
+    A visual guide to the decoding algorithm that balances quality and speed
+    when language models generate text one token at a time.
+  </p>
+</header>
+
+<div class="container">
+
+  <!-- Context -->
+  <section>
+    <h2>The problem: choosing the next word</h2>
+    <p style="margin-bottom: 1rem;">
+      At each step, a language model outputs a probability for every token in its vocabulary.
+      The challenge is deciding <em>which sequence of tokens</em> to produce — not just the single
+      highest-probability token at each step.
+    </p>
+    <div class="cards">
+      <div class="card greedy">
+        <span class="tag amber">Greedy</span>
+        <h4>Pick the best token each step</h4>
+        <p>Fast, but can miss globally better sequences. Like always taking the steepest downhill path and getting stuck in a local minimum.</p>
+      </div>
+      <div class="card beam">
+        <span class="tag blue">Beam search</span>
+        <h4>Keep top-<em>k</em> partial sequences</h4>
+        <p>Maintains <em>k</em> promising hypotheses in parallel. Prunes the rest. A sweet spot between greedy and exhaustive search.</p>
+      </div>
+      <div class="card exhaust">
+        <span class="tag purple">Exhaustive</span>
+        <h4>Explore every path</h4>
+        <p>Guarantees the best sequence, but is intractable — with 50,000 tokens and 20 steps, that's 50,000<sup>20</sup> paths.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Static SVG overview -->
+  <section>
+    <h2>The idea in one picture</h2>
+    <p style="margin-bottom: 1rem; color: var(--muted); font-size: 0.95rem;">
+      With beam width <strong style="color:var(--accent)">k = 2</strong>, only the 2 highest-scoring
+      partial sequences survive at each depth. All others are pruned (grey).
+    </p>
+    <div class="diagram-wrap">
+      <svg viewBox="0 0 780 340" width="100%" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+            <path d="M0,0 L6,3 L0,6 Z" fill="#4ade80"/>
+          </marker>
+        </defs>
+
+        <!-- Depth labels -->
+        <text x="10" y="30" fill="#8b92a8" font-size="11" font-weight="600">START</text>
+        <text x="195" y="30" fill="#8b92a8" font-size="11" font-weight="600">STEP 1</text>
+        <text x="380" y="30" fill="#8b92a8" font-size="11" font-weight="600">STEP 2</text>
+        <text x="565" y="30" fill="#8b92a8" font-size="11" font-weight="600">STEP 3</text>
+        <text x="720" y="30" fill="#4ade80" font-size="11" font-weight="600">BEST</text>
+
+        <!-- Start node -->
+        <circle cx="60" cy="170" r="22" fill="#1a1d27" stroke="#6c9eff" stroke-width="2"/>
+        <text x="60" y="175" text-anchor="middle" fill="#6c9eff" font-size="11" font-weight="600">""</text>
+
+        <!-- Step 1 nodes -->
+        <line x1="82" y1="155" x2="148" y2="100" stroke="#4ade80" stroke-width="2"/>
+        <line x1="82" y1="170" x2="148" y2="170" stroke="#4ade80" stroke-width="2"/>
+        <line x1="82" y1="185" x2="148" y2="240" stroke="#3a3f52" stroke-width="1.5" stroke-dasharray="4"/>
+
+        <rect x="148" y="82" width="64" height="36" rx="8" fill="#22c55e33" stroke="#4ade80" stroke-width="1.5"/>
+        <text x="180" y="105" text-anchor="middle" fill="#e8eaf0" font-size="12" font-weight="600">"The"</text>
+
+        <rect x="148" y="152" width="64" height="36" rx="8" fill="#22c55e33" stroke="#4ade80" stroke-width="1.5"/>
+        <text x="180" y="175" text-anchor="middle" fill="#e8eaf0" font-size="12" font-weight="600">"A"</text>
+
+        <rect x="148" y="222" width="64" height="36" rx="8" fill="#1a1d27" stroke="#3a3f52" stroke-width="1" opacity="0.5"/>
+        <text x="180" y="245" text-anchor="middle" fill="#3a3f52" font-size="12">"In"</text>
+
+        <!-- Step 2 nodes from "The" -->
+        <line x1="212" y1="100" x2="278" y2="70" stroke="#4ade80" stroke-width="2"/>
+        <line x1="212" y1="100" x2="278" y2="130" stroke="#3a3f52" stroke-width="1.5" stroke-dasharray="4"/>
+        <line x1="212" y1="170" x2="278" y2="170" stroke="#4ade80" stroke-width="2"/>
+        <line x1="212" y1="170" x2="278" y2="210" stroke="#3a3f52" stroke-width="1.5" stroke-dasharray="4"/>
+
+        <rect x="278" y="52" width="80" height="36" rx="8" fill="#22c55e33" stroke="#4ade80" stroke-width="1.5"/>
+        <text x="318" y="75" text-anchor="middle" fill="#e8eaf0" font-size="11" font-weight="600">"The cat"</text>
+
+        <rect x="278" y="112" width="80" height="36" rx="8" fill="#1a1d27" stroke="#3a3f52" stroke-width="1" opacity="0.5"/>
+        <text x="318" y="135" text-anchor="middle" fill="#3a3f52" font-size="11">"The dog"</text>
+
+        <rect x="278" y="152" width="80" height="36" rx="8" fill="#22c55e33" stroke="#4ade80" stroke-width="1.5"/>
+        <text x="318" y="175" text-anchor="middle" fill="#e8eaf0" font-size="11" font-weight="600">"A big"</text>
+
+        <rect x="278" y="192" width="80" height="36" rx="8" fill="#1a1d27" stroke="#3a3f52" stroke-width="1" opacity="0.5"/>
+        <text x="318" y="215" text-anchor="middle" fill="#3a3f52" font-size="11">"A small"</text>
+
+        <!-- Step 3 -->
+        <line x1="358" y1="70" x2="424" y2="55" stroke="#4ade80" stroke-width="2"/>
+        <line x1="358" y1="70" x2="424" y2="95" stroke="#3a3f52" stroke-width="1.5" stroke-dasharray="4"/>
+        <line x1="358" y1="170" x2="424" y2="155" stroke="#4ade80" stroke-width="2"/>
+        <line x1="358" y1="170" x2="424" y2="195" stroke="#3a3f52" stroke-width="1.5" stroke-dasharray="4"/>
+
+        <rect x="424" y="37" width="96" height="36" rx="8" fill="#22c55e33" stroke="#4ade80" stroke-width="1.5"/>
+        <text x="472" y="60" text-anchor="middle" fill="#e8eaf0" font-size="11" font-weight="600">"The cat sat"</text>
+
+        <rect x="424" y="77" width="96" height="36" rx="8" fill="#1a1d27" stroke="#3a3f52" stroke-width="1" opacity="0.5"/>
+        <text x="472" y="100" text-anchor="middle" fill="#3a3f52" font-size="11">"The cat ran"</text>
+
+        <rect x="424" y="137" width="96" height="36" rx="8" fill="#22c55e33" stroke="#4ade80" stroke-width="1.5"/>
+        <text x="472" y="160" text-anchor="middle" fill="#e8eaf0" font-size="11" font-weight="600">"A big cat"</text>
+
+        <rect x="424" y="177" width="96" height="36" rx="8" fill="#1a1d27" stroke="#3a3f52" stroke-width="1" opacity="0.5"/>
+        <text x="472" y="200" text-anchor="middle" fill="#3a3f52" font-size="11">"A big dog"</text>
+
+        <!-- Final -->
+        <line x1="520" y1="55" x2="600" y2="55" stroke="#4ade80" stroke-width="2" marker-end="url(#arrow)"/>
+        <rect x="600" y="37" width="120" height="36" rx="8" fill="#22c55e33" stroke="#4ade80" stroke-width="2"/>
+        <text x="660" y="60" text-anchor="middle" fill="#4ade80" font-size="11" font-weight="700">"The cat sat"</text>
+
+        <!-- Prune labels -->
+        <text x="180" y="280" text-anchor="middle" fill="#3a3f52" font-size="10">✂ pruned</text>
+        <text x="318" y="280" text-anchor="middle" fill="#3a3f52" font-size="10">✂ pruned</text>
+        <text x="472" y="280" text-anchor="middle" fill="#3a3f52" font-size="10">✂ pruned</text>
+
+        <!-- k=2 label -->
+        <rect x="600" y="290" width="120" height="28" rx="6" fill="#6c9eff22" stroke="#6c9eff" stroke-width="1"/>
+        <text x="660" y="308" text-anchor="middle" fill="#6c9eff" font-size="11" font-weight="600">keep top k=2</text>
+
+        <!-- Legend -->
+        <rect x="30" y="310" width="14" height="14" rx="3" fill="#22c55e33" stroke="#4ade80" stroke-width="1.5"/>
+        <text x="50" y="322" fill="#8b92a8" font-size="10">Kept in beam</text>
+        <rect x="160" y="310" width="14" height="14" rx="3" fill="#1a1d27" stroke="#3a3f52" stroke-width="1"/>
+        <text x="180" y="322" fill="#8b92a8" font-size="10">Pruned</text>
+      </svg>
+    </div>
+  </section>
+
+  <!-- Scoring -->
+  <section>
+    <h2>How sequences are scored</h2>
+    <p style="margin-bottom: 0.5rem;">
+      Each partial sequence gets a <strong>cumulative log-probability</strong> — the sum of
+      log-probabilities of every token chosen so far. Higher (less negative) is better.
+    </p>
+    <div class="formula">
+      score("The cat") = log P(The | prompt) + log P(cat | prompt, The)
+    </div>
+    <p style="font-size: 0.9rem; color: var(--muted);">
+      Because probabilities multiply (and shrink quickly), we work in log-space to avoid
+      underflow and to turn products into sums.
+    </p>
+  </section>
+
+  <!-- Interactive demo -->
+  <section>
+    <h2>Interactive walkthrough</h2>
+    <p style="margin-bottom: 1rem; color: var(--muted); font-size: 0.95rem;">
+      Step through a tiny example. Adjust beam width <em>k</em> to see how many hypotheses survive each round.
+    </p>
+
+    <div class="demo-panel">
+      <div class="demo-controls">
+        <div class="control-group">
+          <label for="beamWidth">Beam width (k)</label>
+          <input type="range" id="beamWidth" min="1" max="4" value="2">
+          <span class="beam-value" id="beamValue">2</span>
+        </div>
+        <div class="control-group" style="margin-left:auto; gap:0.5rem;">
+          <button id="btnPrev" disabled>← Prev</button>
+          <button id="btnNext" class="primary">Next step →</button>
+          <button id="btnReset">Reset</button>
+        </div>
+      </div>
+
+      <div class="demo-body">
+        <div class="prompt-bar">
+          <span class="label">Prompt:</span>
+          <span class="prompt">"Once upon a"</span>
+        </div>
+
+        <div class="step-indicator">
+          <span>Step <strong id="currentStep">0</strong> / <strong id="totalSteps">3</strong></span>
+          <div class="step-dots" id="stepDots"></div>
+        </div>
+
+        <div class="beam-viz" id="beamViz"></div>
+
+        <div class="final-result" id="finalResult">
+          <div class="label">Best completed sequence</div>
+          <div id="finalSeq"></div>
+        </div>
+
+        <div class="legend">
+          <div class="legend-item">
+            <div class="legend-swatch" style="background:var(--green-dim);border:1px solid var(--green)"></div>
+            Kept in beam
+          </div>
+          <div class="legend-item">
+            <div class="legend-swatch" style="background:#6c9eff15;border:1px solid var(--accent)"></div>
+            Being expanded
+          </div>
+          <div class="legend-item">
+            <div class="legend-swatch" style="background:transparent;border:1px solid var(--pruned);opacity:0.5"></div>
+            Pruned
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Algorithm pseudocode -->
+  <section>
+    <h2>The algorithm</h2>
+    <div class="algo-box">
+<span class="cm"># beam_width = k, max_steps = number of tokens to generate</span>
+<span class="kw">def</span> <span class="fn">beam_search</span>(prompt, model, k, max_steps):
+    beam = [(prompt, <span class="num">0.0</span>)]  <span class="cm"># list of (sequence, cumulative_log_prob)</span>
+
+    <span class="kw">for</span> step <span class="kw">in</span> range(max_steps):
+        candidates = []
+
+        <span class="kw">for</span> (seq, score) <span class="kw">in</span> beam:
+            <span class="kw">for</span> token, log_prob <span class="kw">in</span> model.next_token_probs(seq):
+                candidates.append((seq + token, score + log_prob))
+
+        <span class="cm"># Sort by score descending, keep top k</span>
+        candidates.sort(key=<span class="kw">lambda</span> x: x[<span class="num">1</span>], reverse=<span class="kw">True</span>)
+        beam = candidates[:k]
+
+        <span class="kw">if</span> all_finished(beam):
+            <span class="kw">break</span>
+
+    <span class="kw">return</span> beam[<span class="num">0</span>]  <span class="cm"># highest-scoring complete sequence</span>
+    </div>
+  </section>
+
+  <!-- Key takeaways -->
+  <section>
+    <h2>Key takeaways</h2>
+    <ul style="padding-left: 1.25rem; display: flex; flex-direction: column; gap: 0.6rem;">
+      <li><strong style="color:var(--text)">Beam width k</strong> controls the quality/speed tradeoff. Larger k explores more but costs k× more compute per step.</li>
+      <li><strong style="color:var(--text)">Pruning</strong> happens after every expansion — only the k best cumulative scores survive.</li>
+      <li><strong style="color:var(--text)">Not guaranteed optimal</strong> — a sequence pruned early can never come back, even if it would have been best overall.</li>
+      <li><strong style="color:var(--text)">Length bias</strong> — longer sequences accumulate more negative log-probs. Production systems often normalize by length (length penalty).</li>
+      <li><strong style="color:var(--text)">Used in</strong> machine translation, speech recognition, and any seq2seq task where you want better output than greedy decoding without exhaustive search.</li>
+    </ul>
+  </section>
+
+</div>
+
+<script>
+  // Toy vocabulary and log-probabilities for demo
+  // Each step: { token: log_prob } for extensions from current beam
+  const PROMPT = "Once upon a";
+
+  const STEPS = [
+    {
+      desc: "Expand the empty beam (just the prompt). Each candidate adds one token.",
+      expansions: [
+        { seq: ["time"], score: -0.3 },
+        { seq: ["day"], score: -0.8 },
+        { seq: ["night"], score: -1.2 },
+        { seq: ["story"], score: -1.5 },
+      ]
+    },
+    {
+      desc: "Expand each surviving hypothesis by one more token.",
+      expansions: [
+        { parent: ["time"], items: [
+          { seq: ["time", "there"], score: -0.9 },
+          { seq: ["time", "a"], score: -1.1 },
+          { seq: ["time", "in"], score: -1.6 },
+        ]},
+        { parent: ["day"], items: [
+          { seq: ["day", "there"], score: -1.4 },
+          { seq: ["day", "a"], score: -1.5 },
+          { seq: ["day", "the"], score: -2.0 },
+        ]},
+      ]
+    },
+    {
+      desc: "One more expansion. The highest-scoring complete sequence wins.",
+      expansions: [
+        { parent: ["time", "there"], items: [
+          { seq: ["time", "there", "was"], score: -1.2 },
+          { seq: ["time", "there", "lived"], score: -1.8 },
+        ]},
+        { parent: ["time", "a"], items: [
+          { seq: ["time", "a", "king"], score: -1.5 },
+          { seq: ["time", "a", "cat"], score: -2.1 },
+        ]},
+        { parent: ["day", "there"], items: [
+          { seq: ["day", "there", "was"], score: -1.9 },
+          { seq: ["day", "there", "lived"], score: -2.3 },
+        ]},
+      ]
+    }
+  ];
+
+  let currentStep = 0;
+  let beamWidth = 2;
+
+  const beamWidthEl = document.getElementById('beamWidth');
+  const beamValueEl = document.getElementById('beamValue');
+  const btnPrev = document.getElementById('btnPrev');
+  const btnNext = document.getElementById('btnNext');
+  const btnReset = document.getElementById('btnReset');
+  const beamViz = document.getElementById('beamViz');
+  const currentStepEl = document.getElementById('currentStep');
+  const stepDots = document.getElementById('stepDots');
+  const finalResult = document.getElementById('finalResult');
+  const finalSeq = document.getElementById('finalSeq');
+
+  function getBeamAtStep(step, k) {
+    if (step === 0) return [];
+
+    let allCandidates = [];
+
+    if (step === 1) {
+      allCandidates = STEPS[0].expansions.map(e => ({
+        tokens: e.seq,
+        score: e.score
+      }));
+    } else {
+      const prevBeam = getKeptAtStep(step - 1, k);
+      const stepData = STEPS[step - 1];
+
+      prevBeam.forEach(beamItem => {
+        const group = stepData.expansions.find(e =>
+          JSON.stringify(e.parent) === JSON.stringify(beamItem.tokens)
+        );
+        if (group) {
+          group.items.forEach(item => {
+            allCandidates.push({ tokens: item.seq, score: item.score });
+          });
+        }
+      });
+
+      // Also collect pruned expansions from non-beam parents for display
+    }
+
+    allCandidates.sort((a, b) => b.score - a.score);
+    return allCandidates;
+  }
+
+  function getKeptAtStep(step, k) {
+    const all = getBeamAtStep(step, k);
+    return all.slice(0, k);
+  }
+
+  function formatSeq(tokens, highlightNew) {
+    const promptTokens = PROMPT.split(' ');
+    let html = `<span class="token prompt">${PROMPT}</span> `;
+    tokens.forEach((t, i) => {
+      const isNew = highlightNew !== undefined ? i >= highlightNew : true;
+      html += `<span class="token${isNew ? ' new' : ''}">${t}</span> `;
+    });
+    return html.trim();
+  }
+
+  function renderStep(step) {
+    beamViz.innerHTML = '';
+    finalResult.classList.remove('show');
+
+    if (step === 0) {
+      beamViz.innerHTML = `
+        <div class="beam-step visible">
+          <div class="beam-step-header">
+            <span class="step-badge">INIT</span>
+            <span class="step-desc">The beam starts with the prompt and score 0. Click "Next step" to begin expanding.</span>
+          </div>
+          <div class="candidates">
+            <div class="candidate-row kept">
+              <div class="candidate-seq"><span class="token prompt">${PROMPT}</span></div>
+              <div class="candidate-score">score: <strong>0.00</strong></div>
+            </div>
+          </div>
+        </div>`;
+      return;
+    }
+
+    const k = beamWidth;
+    const stepData = STEPS[step - 1];
+    const allCandidates = getBeamAtStep(step, k);
+    const kept = allCandidates.slice(0, k);
+    const keptKeys = new Set(kept.map(c => JSON.stringify(c.tokens)));
+
+    // Step 1: show expansion from prompt
+    if (step === 1) {
+      const div = document.createElement('div');
+      div.className = 'beam-step visible';
+      div.innerHTML = `
+        <div class="beam-step-header">
+          <span class="step-badge">STEP 1</span>
+          <span class="step-desc">${stepData.desc}</span>
+        </div>
+        <div class="candidates">
+          <div class="candidate-row expanded">
+            <div class="candidate-seq"><span class="token prompt">${PROMPT}</span></div>
+            <div class="candidate-score">expanding…</div>
+          </div>
+        </div>
+        <div class="expansion-arrow">↓ all possible one-token extensions</div>
+        <div class="expansion-group"><div class="candidates" id="candidates1"></div></div>
+        <div class="expansion-arrow">↓ keep top k=${k}</div>
+        <div class="expansion-group"><div class="candidates" id="kept1"></div></div>
+      `;
+      beamViz.appendChild(div);
+
+      const candEl = div.querySelector('#candidates1');
+      allCandidates.forEach(c => {
+        const row = document.createElement('div');
+        row.className = 'candidate-row' + (keptKeys.has(JSON.stringify(c.tokens)) ? ' kept' : ' pruned');
+        row.innerHTML = `
+          <div class="candidate-seq">${formatSeq(c.tokens, 0)}</div>
+          <div class="candidate-score">score: <strong>${c.score.toFixed(1)}</strong></div>`;
+        candEl.appendChild(row);
+      });
+
+      const keptEl = div.querySelector('#kept1');
+      kept.forEach(c => {
+        const row = document.createElement('div');
+        row.className = 'candidate-row kept';
+        row.innerHTML = `
+          <div class="candidate-seq">${formatSeq(c.tokens, 0)}</div>
+          <div class="candidate-score">score: <strong>${c.score.toFixed(1)}</strong></div>`;
+        keptEl.appendChild(row);
+      });
+      return;
+    }
+
+    // Steps 2+
+    const prevKept = getKeptAtStep(step - 1, k);
+    const div = document.createElement('div');
+    div.className = 'beam-step visible';
+    div.innerHTML = `
+      <div class="beam-step-header">
+        <span class="step-badge">STEP ${step}</span>
+        <span class="step-desc">${stepData.desc}</span>
+      </div>
+    `;
+
+    // Show each beam item being expanded
+    prevKept.forEach(beamItem => {
+      const group = stepData.expansions.find(e =>
+        JSON.stringify(e.parent) === JSON.stringify(beamItem.tokens)
+      );
+      if (!group) return;
+
+      const section = document.createElement('div');
+      section.style.marginBottom = '1rem';
+      section.innerHTML = `
+        <div class="candidates">
+          <div class="candidate-row expanded">
+            <div class="candidate-seq">${formatSeq(beamItem.tokens, -1)}</div>
+            <div class="candidate-score">score: <strong>${beamItem.score.toFixed(1)}</strong></div>
+          </div>
+        </div>
+        <div class="expansion-arrow">↓ extend</div>
+        <div class="expansion-group"><div class="candidates ext-group"></div></div>
+      `;
+
+      const extGroup = section.querySelector('.ext-group');
+      group.items.forEach(item => {
+        const isKept = keptKeys.has(JSON.stringify(item.seq));
+        const row = document.createElement('div');
+        row.className = 'candidate-row' + (isKept ? ' kept' : ' pruned');
+        row.innerHTML = `
+          <div class="candidate-seq">${formatSeq(item.seq, beamItem.tokens.length)}</div>
+          <div class="candidate-score">score: <strong>${item.score.toFixed(1)}</strong></div>`;
+        extGroup.appendChild(row);
+      });
+
+      div.appendChild(section);
+    });
+
+    div.innerHTML += `
+      <div class="expansion-arrow">↓ merge all extensions, keep top k=${k}</div>
+      <div class="expansion-group"><div class="candidates" id="finalKept"></div></div>
+    `;
+
+    beamViz.appendChild(div);
+
+    const finalKeptEl = div.querySelector('#finalKept');
+    kept.forEach(c => {
+      const row = document.createElement('div');
+      row.className = 'candidate-row kept';
+      row.innerHTML = `
+        <div class="candidate-seq">${formatSeq(c.tokens, 0)}</div>
+        <div class="candidate-score">score: <strong>${c.score.toFixed(1)}</strong></div>`;
+      finalKeptEl.appendChild(row);
+    });
+
+    if (step === STEPS.length) {
+      const best = kept[0];
+      finalResult.classList.add('show');
+      finalSeq.innerHTML = `"${PROMPT} ${best.tokens.join(' ')}" &nbsp;→&nbsp; score: ${best.score.toFixed(1)}`;
+    }
+  }
+
+  function updateDots() {
+    stepDots.innerHTML = '';
+    for (let i = 0; i <= STEPS.length; i++) {
+      const dot = document.createElement('div');
+      dot.className = 'step-dot' + (i === currentStep ? ' active' : '') + (i < currentStep ? ' done' : '');
+      stepDots.appendChild(dot);
+    }
+  }
+
+  function updateUI() {
+    beamValueEl.textContent = beamWidth;
+    currentStepEl.textContent = currentStep;
+    btnPrev.disabled = currentStep === 0;
+    btnNext.disabled = currentStep === STEPS.length;
+    renderStep(currentStep);
+    updateDots();
+  }
+
+  beamWidthEl.addEventListener('input', () => {
+    beamWidth = parseInt(beamWidthEl.value);
+    updateUI();
+  });
+
+  btnNext.addEventListener('click', () => {
+    if (currentStep < STEPS.length) {
+      currentStep++;
+      updateUI();
+    }
+  });
+
+  btnPrev.addEventListener('click', () => {
+    if (currentStep > 0) {
+      currentStep--;
+      updateUI();
+    }
+  });
+
+  btnReset.addEventListener('click', () => {
+    currentStep = 0;
+    updateUI();
+  });
+
+  updateUI();
+</script>
+
+</body>
+</html>

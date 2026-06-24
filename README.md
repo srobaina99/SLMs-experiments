@@ -87,6 +87,7 @@ Dockerfile lives in the sibling thesis repo:
 | [docs/metrics.md](docs/metrics.md) | Readability metrics and A1 thresholds |
 | [docs/models.md](docs/models.md) | GGUF files, chat templates, GPU setup |
 | [docs/interventions.md](docs/interventions.md) | Weighting, prompting, beam mechanics |
+| [docs/guided-decoding.md](docs/guided-decoding.md) | Top-k A1-guided decoding (planned intervention) |
 
 ## Testing
 

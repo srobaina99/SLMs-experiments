@@ -14,6 +14,7 @@ Two research phases, one shared pipeline, run-centric results.
 | [docs/metrics.md](docs/metrics.md) | Readability metrics, A1 thresholds | Working on `evaluation/` |
 | [docs/models.md](docs/models.md) | GGUF files, templates, GPU setup | Adding/fixing model wrappers |
 | [docs/interventions.md](docs/interventions.md) | Weighting, prompting, beam mechanics | Changing intervention logic |
+| [docs/guided-decoding.md](docs/guided-decoding.md) | Top-k A1-guided decoding (design, not yet implemented) | Implementing guided decode / `phase2 guided` |
 | [docs/clusteruy.md](docs/clusteruy.md) | ClusterUY SSH, Singularity, Phase 2 batch jobs | Running experiments on the cluster |
 | [README.md](README.md) | Human setup quickstart | Environment issues |
 
