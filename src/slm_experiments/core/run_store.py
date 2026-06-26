@@ -42,19 +42,20 @@ NUMERIC_SUMMARY_COLUMNS = [
 SWEEP_SUMMARY_SECTIONS = {
     "weights": ("by_weight_factor", "weight_factor"),
     "beam": ("by_beam_width", "beam_width"),
+    "kvl_beam": ("by_kvl_beam_width", "kvl_beam_width"),
     "prompting": ("by_num_shots", "num_shots"),
     "guided": ("by_guided_top_k", "guided_top_k"),
 }
 
 
 def _format_sweep_key(column: str, value: Any) -> str:
-    if column in ("beam_width", "num_shots", "guided_top_k"):
+    if column in ("beam_width", "kvl_beam_width", "num_shots", "guided_top_k"):
         return str(int(value))
     return f"{float(value):g}"
 
 
 def _sweep_sort_key(column: str, value: Any) -> float:
-    if column in ("beam_width", "num_shots", "guided_top_k"):
+    if column in ("beam_width", "kvl_beam_width", "num_shots", "guided_top_k"):
         return float(int(value))
     return float(value)
 

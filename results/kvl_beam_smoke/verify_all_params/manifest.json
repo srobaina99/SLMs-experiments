@@ -1,0 +1,88 @@
+{
+  "run_id": "verify_all_params",
+  "started_at": "2026-06-26T21:46:07.675097+00:00",
+  "completed_at": "2026-06-26T22:26:53.228366+00:00",
+  "model": "Qwen3",
+  "prompt_indices": [
+    0,
+    1
+  ],
+  "config_count": 16,
+  "configs": [
+    {
+      "variant": "baseline",
+      "length_penalty_alpha": null
+    },
+    {
+      "variant": "always_stop",
+      "length_penalty_alpha": null
+    },
+    {
+      "variant": "length_penalty",
+      "length_penalty_alpha": 0.15
+    },
+    {
+      "variant": "prefer_finished",
+      "length_penalty_alpha": null
+    },
+    {
+      "variant": "stop_pref",
+      "length_penalty_alpha": null
+    },
+    {
+      "variant": "max80",
+      "length_penalty_alpha": null
+    },
+    {
+      "variant": "stop_length",
+      "length_penalty_alpha": 0.15
+    },
+    {
+      "variant": "stop_length",
+      "length_penalty_alpha": 0.25
+    },
+    {
+      "variant": "stop_length",
+      "length_penalty_alpha": 0.35
+    },
+    {
+      "variant": "stop_length",
+      "length_penalty_alpha": 0.5
+    },
+    {
+      "variant": "stop_length",
+      "length_penalty_alpha": 0.75
+    },
+    {
+      "variant": "stop_length",
+      "length_penalty_alpha": 1.0
+    },
+    {
+      "variant": "stop_length",
+      "length_penalty_alpha": 1.5
+    },
+    {
+      "variant": "length_penalty",
+      "length_penalty_alpha": 0.5
+    },
+    {
+      "variant": "length_penalty",
+      "length_penalty_alpha": 1.0
+    },
+    {
+      "variant": "length_penalty",
+      "length_penalty_alpha": 1.5
+    }
+  ],
+  "sweep_mode": {
+    "variant": null,
+    "sweep": null,
+    "sweep_configs": "baseline,always_stop,length_penalty:0.15,prefer_finished,stop_pref,max80,stop_length:0.15,stop_length:0.25,stop_length:0.35,stop_length:0.5,stop_length:0.75,stop_length:1.0,stop_length:1.5,length_penalty:0.5,length_penalty:1.0,length_penalty:1.5",
+    "sweep_all_length": false,
+    "alphas": null
+  },
+  "artifacts": {
+    "json": "sweep.json",
+    "csv": "sweep.csv"
+  }
+}

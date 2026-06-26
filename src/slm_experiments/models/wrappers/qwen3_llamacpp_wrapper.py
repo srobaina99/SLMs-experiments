@@ -21,7 +21,7 @@ class Qwen3LlamaCppWrapper(LlamaCppBaseWrapper):
             model_path=model_path or default_gguf_path(self.DEFAULT_GGUF),
             n_ctx=2048,
             n_threads=4,
-            n_gpu_layers=0,
+            n_gpu_layers=-1,
             timeout_seconds=timeout_seconds,
             seed=seed,
         )

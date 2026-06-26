@@ -43,6 +43,21 @@ class GuidedModelWrapper(Protocol):
         ...
 
 
+@runtime_checkable
+class KvlBeamModelWrapper(Protocol):
+    """Model interface for KVL-scored beam search experiments."""
+
+    def generate_kvl_beam(
+        self,
+        prompt: str,
+        config: ExperimentConfig,
+        beam_width: int = 4,
+        branch_factor: int = 10,
+    ) -> Dict[str, Any]:
+        """Return response, kvl_beam metadata, response_time_seconds, generation_successful."""
+        ...
+
+
 class ExperimentPipeline:
     """Single-observation pipeline: generate, format, evaluate, record."""
 
@@ -264,4 +279,84 @@ class ExperimentPipeline:
             generation_successful=False,
             meets_a1_criteria=False,
             **guided_kwargs,
+        )
+
+    def run_kvl_beam(
+        self,
+        prompt: str,
+        config: ExperimentConfig,
+        model: KvlBeamModelWrapper,
+        beam_width: int,
+        branch_factor: int = 10,
+        experiment_name: Optional[str] = None,
+    ) -> ExperimentResult:
+        """Execute one prompt through KVL beam search, format, evaluate, record."""
+        name = experiment_name or config.experiment_name
+        response_data = model.generate_kvl_beam(
+            prompt,
+            config,
+            beam_width=beam_width,
+            branch_factor=branch_factor,
+        )
+
+        raw_response = response_data.get("response") or ""
+        response_time = float(response_data.get("response_time_seconds", 0.0))
+        model_success = bool(response_data.get("generation_successful", False))
+
+        cleaned = self.formatter.clean_response_for_evaluation(raw_response)
+        is_successful = model_success and bool(cleaned.strip())
+
+        kvl_beam_kwargs = {
+            "kvl_beam_width": int(response_data.get("kvl_beam_width", beam_width)),
+            "kvl_branch_factor": int(
+                response_data.get("kvl_branch_factor", branch_factor)
+            ),
+            "kvl_beam_steps_total": int(response_data.get("kvl_beam_steps_total", 0)),
+            "kvl_beam_words_scored": int(response_data.get("kvl_beam_words_scored", 0)),
+            "kvl_beam_running_mean": response_data.get("kvl_beam_running_mean"),
+            "kvl_beam_logprob_tiebreak": float(
+                response_data.get("kvl_beam_logprob_tiebreak", 0.0)
+            ),
+            "kvl_beam_candidates_pruned": int(
+                response_data.get("kvl_beam_candidates_pruned", 0)
+            ),
+        }
+
+        if is_successful:
+            text_metrics = self.text_evaluator.evaluate_text_comprehensive(cleaned)
+            grade = text_metrics.get("grade_level_indices", {})
+            read = text_metrics.get("readability_scores", {})
+            meets_a1 = meets_a1_criteria(
+                grade.get("flesch_kincaid_grade", 0.0),
+                grade.get("gunning_fog", 0.0),
+                read.get("spache_readability", 0.0),
+                generation_valid=True,
+            )
+            return ExperimentResult.create_from_kvl_beam_response(
+                prompt=prompt,
+                response=raw_response,
+                config=config,
+                response_time=response_time,
+                text_metrics=text_metrics,
+                experiment_name=name,
+                cleaned_response=cleaned,
+                generation_successful=True,
+                meets_a1_criteria=meets_a1,
+                kvl_metrics=self._compute_kvl_metrics(cleaned, config.kvl_l1),
+                **kvl_beam_kwargs,
+            )
+
+        empty_metrics = self.text_evaluator.evaluate_text_comprehensive("")
+        return ExperimentResult.create_from_kvl_beam_response(
+            prompt=prompt,
+            response=raw_response,
+            config=config,
+            response_time=response_time,
+            text_metrics=empty_metrics,
+            experiment_name=name,
+            cleaned_response=cleaned,
+            generation_successful=False,
+            meets_a1_criteria=False,
+            kvl_metrics=empty_kvl_metrics(config.kvl_l1),
+            **kvl_beam_kwargs,
         )

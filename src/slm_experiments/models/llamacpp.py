@@ -7,6 +7,7 @@ from abc import abstractmethod
 from typing import Any, Dict, List, Optional
 
 from slm_experiments.core.config import ExperimentConfig
+from slm_experiments.evaluation.kvl import KvlLookup
 from slm_experiments.evaluation.metrics import TextEvaluator
 from slm_experiments.models.base import (
     BaseModelWrapper,
@@ -17,6 +18,11 @@ from slm_experiments.models.base import (
 from slm_experiments.models.a1_token_index import A1TokenIndex
 from slm_experiments.models.beam import BeamSearchGenerator
 from slm_experiments.models.constrained_decoder import ConstrainedDecoder
+from slm_experiments.models.kvl_beam_decoder import (
+    KvlBeamDecoder,
+    make_llamacpp_eval_fn,
+    resolve_llamacpp_stop_token_ids,
+)
 
 try:
     from llama_cpp import Llama
@@ -53,6 +59,7 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
         self.llm = None
         self.model_loaded = False
         self._a1_token_index_cache: Dict[str, A1TokenIndex] = {}
+        self._kvl_lookup: Optional[KvlLookup] = None
 
         super().__init__(model_name, timeout_seconds, vocab_path=vocab_path)
         self._initialize_model()
@@ -115,6 +122,17 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
                 use_trie=use_trie,
             )
         return self._a1_token_index_cache[cache_key]
+
+    def _get_stop_token_ids(self) -> frozenset[int]:
+        if not self.llm:
+            return frozenset()
+        return resolve_llamacpp_stop_token_ids(self.llm, self._get_stop_tokens())
+
+    @property
+    def kvl_lookup(self) -> KvlLookup:
+        if self._kvl_lookup is None:
+            self._kvl_lookup = KvlLookup()
+        return self._kvl_lookup
 
     def _create_logit_bias(
         self, vocab: List[str], weight_factor: float
@@ -575,6 +593,199 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
                 "guided_steps_fallback_argmax": 0,
                 "guided_steps_no_a1_in_pool": 0,
                 "guided_intervention_rate": 0.0,
+            }
+
+    def _kvl_beam_timeout_seconds(
+        self,
+        max_new_tokens: int,
+        beam_width: int,
+        branch_factor: int,
+    ) -> int:
+        """Wall-clock budget for KVL beam (full re-eval per candidate)."""
+        # Each decode step runs up to beam_width llama evals (one per active beam).
+        evals_per_token = max(beam_width, 1)
+        seconds_per_eval = 12.0
+        return int(
+            max(
+                self.timeout_seconds,
+                max_new_tokens * evals_per_token * seconds_per_eval + 300,
+            )
+        )
+
+    def generate_kvl_beam(
+        self,
+        prompt: str,
+        config: ExperimentConfig,
+        beam_width: int = 4,
+        branch_factor: int = 10,
+    ) -> Dict[str, Any]:
+        """Generate via KVL-scored token-level beam search."""
+        start_time = time.time()
+        beam_timeout = self._kvl_beam_timeout_seconds(
+            config.max_new_tokens, beam_width, branch_factor
+        )
+        try:
+            with timeout_context(beam_timeout):
+                result = self._generate_kvl_beam_impl(
+                    prompt,
+                    config,
+                    beam_width=beam_width,
+                    branch_factor=branch_factor,
+                )
+        except TimeoutError:
+            return self._kvl_beam_failure_response(
+                beam_width,
+                branch_factor,
+                float(beam_timeout),
+                f"Generation timed out after {beam_timeout} seconds",
+            )
+        except Exception as exc:
+            return self._kvl_beam_failure_response(
+                beam_width,
+                branch_factor,
+                time.time() - start_time,
+                str(exc),
+            )
+
+        response = result.get("response") or ""
+        cleaned = self.response_formatter.clean_response_for_evaluation(response)
+        successful = bool(result.get("generation_successful", False)) and bool(
+            cleaned.strip()
+        )
+
+        return {
+            "response": response,
+            "response_time_seconds": float(
+                result.get("response_time_seconds", time.time() - start_time)
+            ),
+            "generation_successful": successful,
+            "error_message": result.get("error_message", ""),
+            "kvl_beam_width": beam_width,
+            "kvl_branch_factor": branch_factor,
+            "kvl_beam_steps_total": result.get("kvl_beam_steps_total", 0),
+            "kvl_beam_words_scored": result.get("kvl_beam_words_scored", 0),
+            "kvl_beam_running_mean": result.get("kvl_beam_running_mean"),
+            "kvl_beam_logprob_tiebreak": result.get("kvl_beam_logprob_tiebreak", 0.0),
+            "kvl_beam_candidates_pruned": result.get("kvl_beam_candidates_pruned", 0),
+        }
+
+    def _kvl_beam_failure_response(
+        self,
+        beam_width: int,
+        branch_factor: int,
+        elapsed: float,
+        error_message: str,
+    ) -> Dict[str, Any]:
+        return {
+            "response": "",
+            "response_time_seconds": elapsed,
+            "generation_successful": False,
+            "error_message": error_message,
+            "kvl_beam_width": beam_width,
+            "kvl_branch_factor": branch_factor,
+            "kvl_beam_steps_total": 0,
+            "kvl_beam_words_scored": 0,
+            "kvl_beam_running_mean": None,
+            "kvl_beam_logprob_tiebreak": 0.0,
+            "kvl_beam_candidates_pruned": 0,
+        }
+
+    def _generate_kvl_beam_impl(
+        self,
+        prompt: str,
+        config: ExperimentConfig,
+        beam_width: int = 4,
+        branch_factor: int = 10,
+    ) -> Dict[str, Any]:
+        if not self.model_loaded or self.llm is None:
+            return {
+                "response": "",
+                "response_time_seconds": 0.0,
+                "generation_successful": False,
+                "error_message": f"{self.model_name} model not loaded",
+                "kvl_beam_steps_total": 0,
+                "kvl_beam_words_scored": 0,
+                "kvl_beam_running_mean": None,
+                "kvl_beam_logprob_tiebreak": 0.0,
+                "kvl_beam_candidates_pruned": 0,
+            }
+
+        start_time = time.time()
+        try:
+            final_prompt = prompt
+            if config.config_prompting:
+                final_prompt = self._add_simplification_context(
+                    prompt, num_shots=config.num_shots
+                )
+
+            formatted_prompt = self._format_prompt(final_prompt, config.system_prompt)
+            prompt_token_ids = self.llm.tokenize(
+                formatted_prompt.encode("utf-8"), add_bos=True
+            )
+
+            decoder = KvlBeamDecoder(
+                kvl_lookup=self.kvl_lookup,
+                l1=config.kvl_l1,
+                text_evaluator=self.text_evaluator,
+                beam_width=beam_width,
+                branch_factor=branch_factor,
+            )
+            eval_fn, decode_suffix = make_llamacpp_eval_fn(
+                self.llm,
+                prompt_token_ids,
+                top_k=config.top_k,
+                top_p=config.top_p,
+            )
+
+            decode_result = decoder.decode(
+                eval_fn,
+                prompt_token_ids,
+                max_tokens=config.max_new_tokens,
+                stop=self._get_stop_tokens(),
+                stop_token_ids=self._get_stop_token_ids(),
+                decode_suffix=decode_suffix,
+            )
+
+            response = self._prepare_beam_scoring_text(decode_result.text)
+            elapsed = time.time() - start_time
+
+            if not response.strip():
+                return {
+                    "response": response,
+                    "response_time_seconds": elapsed,
+                    "generation_successful": False,
+                    "error_message": "Empty generation",
+                    "kvl_beam_steps_total": decode_result.steps_total,
+                    "kvl_beam_words_scored": decode_result.words_scored,
+                    "kvl_beam_running_mean": decode_result.running_mean,
+                    "kvl_beam_logprob_tiebreak": decode_result.cumulative_logprob,
+                    "kvl_beam_candidates_pruned": decode_result.candidates_pruned,
+                }
+
+            return {
+                "response": response,
+                "response_time_seconds": elapsed,
+                "generation_successful": True,
+                "error_message": "",
+                "kvl_beam_steps_total": decode_result.steps_total,
+                "kvl_beam_words_scored": decode_result.words_scored,
+                "kvl_beam_running_mean": decode_result.running_mean,
+                "kvl_beam_logprob_tiebreak": decode_result.cumulative_logprob,
+                "kvl_beam_candidates_pruned": decode_result.candidates_pruned,
+            }
+        except TimeoutError:
+            raise
+        except Exception as exc:
+            return {
+                "response": "",
+                "response_time_seconds": time.time() - start_time,
+                "generation_successful": False,
+                "error_message": str(exc),
+                "kvl_beam_steps_total": 0,
+                "kvl_beam_words_scored": 0,
+                "kvl_beam_running_mean": None,
+                "kvl_beam_logprob_tiebreak": 0.0,
+                "kvl_beam_candidates_pruned": 0,
             }
 
     def cleanup(self):

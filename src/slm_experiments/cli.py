@@ -18,6 +18,7 @@ Phase 2 sweeps
   slm_experiments phase2 weights
   slm_experiments phase2 beam --widths 4,8,10
   slm_experiments phase2 guided --top-k-pools 5,10,20
+  slm_experiments phase2 kvl_beam --widths 4,8
   slm_experiments phase2 prompting --shots 0,1,3
 
 Human review
@@ -109,13 +110,14 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p2 = subparsers.add_parser(
         "phase2",
-        help="Phase 2 hyperparameter sweeps (weights, beam, guided, prompting)",
+        help="Phase 2 hyperparameter sweeps (weights, beam, guided, kvl_beam, prompting)",
         description="Run one Phase 2 sweep. Pick a sweep type as the next argument.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=_examples(
             "slm_experiments phase2 weights",
             "slm_experiments phase2 beam --widths 4,8,10",
             "slm_experiments phase2 guided --top-k-pools 5,10,20",
+            "slm_experiments phase2 kvl_beam --widths 4,8",
             "slm_experiments phase2 prompting --shots 0,1,3 --prompts all",
         ),
     )
@@ -169,6 +171,7 @@ def _build_parser() -> argparse.ArgumentParser:
         epilog=_examples(
             "slm_experiments phase2 guided",
             "slm_experiments phase2 guided --top-k-pools 5,10,20",
+            "slm_experiments phase2 kvl_beam --widths 4,8",
             "slm_experiments phase2 guided --mode trie --models Qwen3 --prompts all",
         ),
     )
@@ -185,6 +188,41 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Guided decoding mode (default: %(default)s)",
     )
     _add_run_options(p2_guided)
+
+    p2_kvl_beam = p2_sub.add_parser(
+        "kvl_beam",
+        help="Sweep KVL-scored token-level beam widths",
+        description=(
+            "Sweep KVL beam width while using running mean GLMM scores "
+            "for candidate selection at word boundaries."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_examples(
+            "slm_experiments phase2 kvl_beam",
+            "slm_experiments phase2 kvl_beam --widths 4,8",
+            "slm_experiments phase2 kvl_beam --models Qwen3 --prompts 1 --widths 4",
+        ),
+    )
+    p2_kvl_beam.add_argument(
+        "--widths",
+        default="4,8",
+        metavar="VALUES",
+        help="Comma-separated KVL beam widths (default: %(default)s)",
+    )
+    p2_kvl_beam.add_argument(
+        "--branch-factor",
+        type=int,
+        default=10,
+        metavar="K",
+        help="Top-K logits expanded per beam per step (default: %(default)s)",
+    )
+    p2_kvl_beam.add_argument(
+        "--kvl-l1",
+        default="es",
+        choices=["es", "de", "cn"],
+        help="Learner L1 for KVL lookup (default: %(default)s)",
+    )
+    _add_run_options(p2_kvl_beam)
 
     p2_prompting = p2_sub.add_parser(
         "prompting",
@@ -393,6 +431,24 @@ def main(argv: list[str] | None = None) -> None:
                 no_plot=args.no_plot,
                 cli_args=cli_args,
                 mode=args.mode,
+            )
+            print(f"Run complete: {run_id}")
+            print(f"Output: {Path(out_dir).resolve()}")
+            return
+
+        if args.sweep == "kvl_beam":
+            from slm_experiments.phase2.kvl_beam import KvlBeamSweepRunner
+
+            runner = KvlBeamSweepRunner()
+            run_id, out_dir = runner.run(
+                widths=args.widths,
+                branch_factor=args.branch_factor,
+                kvl_l1=args.kvl_l1,
+                prompts=args.prompts,
+                models=args.models,
+                seed=args.seed,
+                no_plot=args.no_plot,
+                cli_args=cli_args,
             )
             print(f"Run complete: {run_id}")
             print(f"Output: {Path(out_dir).resolve()}")

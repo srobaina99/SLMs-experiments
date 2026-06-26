@@ -339,6 +339,8 @@ class TestGgufPathResolution:
         local_ggufs = list(Path(REPO_ROOT, "models", "gguf").glob("*.gguf"))
         if local_ggufs:
             pytest.skip("Local GGUF files present; thesis fallback not tested")
+        if not Path(THESIS_GGUF_DIR).is_dir():
+            pytest.skip("Thesis GGUF directory not present; fallback not tested")
 
         assert resolve_gguf_dir() == THESIS_GGUF_DIR
         qwen3_path = default_gguf_path("Qwen3-0.6B-Q4_0.gguf")

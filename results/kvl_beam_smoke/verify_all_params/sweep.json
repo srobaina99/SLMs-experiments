@@ -1,0 +1,578 @@
+[
+  {
+    "variant": "baseline",
+    "length_penalty_alpha": 0.0,
+    "policy": {
+      "always_branch_stop_tokens": false,
+      "length_penalty_alpha": 0.0,
+      "prefer_finished_epsilon": 0.0,
+      "max_tokens_override": null
+    },
+    "observations": [
+      {
+        "prompt_index": 0,
+        "prompt_preview": "What does the word 'library' mean?",
+        "steps_total": 200,
+        "finished_pool_size": 0,
+        "words_scored": 34,
+        "kvl_beam_running_mean": 3.2093205882352946,
+        "response_time_seconds": 70.4,
+        "response_chars": 735,
+        "response_preview": "thought I think the word library means a building where people learn and read books. So, the word library means a building where people learn and read books. |imend| The Simplest Answer A library is a",
+        "hit_max_tokens": true
+      },
+      {
+        "prompt_index": 1,
+        "prompt_preview": "How do I introduce myself in English?",
+        "steps_total": 200,
+        "finished_pool_size": 0,
+        "words_scored": 66,
+        "kvl_beam_running_mean": 2.8295257575757566,
+        "response_time_seconds": 71.8,
+        "response_chars": 571,
+        "response_preview": "super easy, right? Just say, \"Hello, my name is [name] and I am [age] years old.\" That's all! [name] is my name. [age] is how old I am. [name] is my name again. [name] again is my name again. [name] a",
+        "hit_max_tokens": true
+      }
+    ]
+  },
+  {
+    "variant": "always_stop",
+    "length_penalty_alpha": 0.0,
+    "policy": {
+      "always_branch_stop_tokens": true,
+      "length_penalty_alpha": 0.0,
+      "prefer_finished_epsilon": 0.0,
+      "max_tokens_override": null
+    },
+    "observations": [
+      {
+        "prompt_index": 0,
+        "prompt_preview": "What does the word 'library' mean?",
+        "steps_total": 200,
+        "finished_pool_size": 4782,
+        "words_scored": 34,
+        "kvl_beam_running_mean": 3.2093205882352946,
+        "response_time_seconds": 71.8,
+        "response_chars": 735,
+        "response_preview": "thought I think the word library means a building where people learn and read books. So, the word library means a building where people learn and read books. |imend| The Simplest Answer A library is a",
+        "hit_max_tokens": true
+      },
+      {
+        "prompt_index": 1,
+        "prompt_preview": "How do I introduce myself in English?",
+        "steps_total": 200,
+        "finished_pool_size": 4782,
+        "words_scored": 66,
+        "kvl_beam_running_mean": 2.8295257575757566,
+        "response_time_seconds": 106.5,
+        "response_chars": 571,
+        "response_preview": "super easy, right? Just say, \"Hello, my name is [name] and I am [age] years old.\" That's all! [name] is my name. [age] is how old I am. [name] is my name again. [name] again is my name again. [name] a",
+        "hit_max_tokens": true
+      }
+    ]
+  },
+  {
+    "variant": "length_penalty",
+    "length_penalty_alpha": 0.15,
+    "policy": {
+      "always_branch_stop_tokens": false,
+      "length_penalty_alpha": 0.15,
+      "prefer_finished_epsilon": 0.0,
+      "max_tokens_override": null
+    },
+    "observations": [
+      {
+        "prompt_index": 0,
+        "prompt_preview": "What does the word 'library' mean?",
+        "steps_total": 200,
+        "finished_pool_size": 0,
+        "words_scored": 34,
+        "kvl_beam_running_mean": 3.2093205882352946,
+        "response_time_seconds": 112.5,
+        "response_chars": 735,
+        "response_preview": "thought I think the word library means a building where people learn and read books. So, the word library means a building where people learn and read books. |imend| The Simplest Answer A library is a",
+        "hit_max_tokens": true
+      },
+      {
+        "prompt_index": 1,
+        "prompt_preview": "How do I introduce myself in English?",
+        "steps_total": 200,
+        "finished_pool_size": 0,
+        "words_scored": 66,
+        "kvl_beam_running_mean": 2.8295257575757566,
+        "response_time_seconds": 101.6,
+        "response_chars": 571,
+        "response_preview": "super easy, right? Just say, \"Hello, my name is [name] and I am [age] years old.\" That's all! [name] is my name. [age] is how old I am. [name] is my name again. [name] again is my name again. [name] a",
+        "hit_max_tokens": true
+      }
+    ]
+  },
+  {
+    "variant": "prefer_finished",
+    "length_penalty_alpha": 0.0,
+    "policy": {
+      "always_branch_stop_tokens": false,
+      "length_penalty_alpha": 0.0,
+      "prefer_finished_epsilon": 0.25,
+      "max_tokens_override": null
+    },
+    "observations": [
+      {
+        "prompt_index": 0,
+        "prompt_preview": "What does the word 'library' mean?",
+        "steps_total": 200,
+        "finished_pool_size": 0,
+        "words_scored": 34,
+        "kvl_beam_running_mean": 3.2093205882352946,
+        "response_time_seconds": 93.3,
+        "response_chars": 735,
+        "response_preview": "thought I think the word library means a building where people learn and read books. So, the word library means a building where people learn and read books. |imend| The Simplest Answer A library is a",
+        "hit_max_tokens": true
+      },
+      {
+        "prompt_index": 1,
+        "prompt_preview": "How do I introduce myself in English?",
+        "steps_total": 200,
+        "finished_pool_size": 0,
+        "words_scored": 66,
+        "kvl_beam_running_mean": 2.8295257575757566,
+        "response_time_seconds": 90.9,
+        "response_chars": 571,
+        "response_preview": "super easy, right? Just say, \"Hello, my name is [name] and I am [age] years old.\" That's all! [name] is my name. [age] is how old I am. [name] is my name again. [name] again is my name again. [name] a",
+        "hit_max_tokens": true
+      }
+    ]
+  },
+  {
+    "variant": "stop_pref",
+    "length_penalty_alpha": 0.0,
+    "policy": {
+      "always_branch_stop_tokens": true,
+      "length_penalty_alpha": 0.0,
+      "prefer_finished_epsilon": 0.25,
+      "max_tokens_override": null
+    },
+    "observations": [
+      {
+        "prompt_index": 0,
+        "prompt_preview": "What does the word 'library' mean?",
+        "steps_total": 200,
+        "finished_pool_size": 4782,
+        "words_scored": 34,
+        "kvl_beam_running_mean": 3.2093205882352946,
+        "response_time_seconds": 79.4,
+        "response_chars": 599,
+        "response_preview": "thought I think the word library means a building where people learn and read books. So, the word library means a building where people learn and read books. |imend| The Simplest Answer A library is a",
+        "hit_max_tokens": true
+      },
+      {
+        "prompt_index": 1,
+        "prompt_preview": "How do I introduce myself in English?",
+        "steps_total": 200,
+        "finished_pool_size": 4782,
+        "words_scored": 66,
+        "kvl_beam_running_mean": 2.8295257575757566,
+        "response_time_seconds": 77.3,
+        "response_chars": 568,
+        "response_preview": "super easy, right? Just say, \"Hello, my name is [name] and I am [age] years old.\" That's all! [name] is my name. [age] is how old I am. [name] is my name again. [name] again is my name again. [name] a",
+        "hit_max_tokens": true
+      }
+    ]
+  },
+  {
+    "variant": "max80",
+    "length_penalty_alpha": 0.0,
+    "policy": {
+      "always_branch_stop_tokens": false,
+      "length_penalty_alpha": 0.0,
+      "prefer_finished_epsilon": 0.0,
+      "max_tokens_override": 80
+    },
+    "observations": [
+      {
+        "prompt_index": 0,
+        "prompt_preview": "What does the word 'library' mean?",
+        "steps_total": 80,
+        "finished_pool_size": 0,
+        "words_scored": 23,
+        "kvl_beam_running_mean": 3.06284347826087,
+        "response_time_seconds": 32.7,
+        "response_chars": 318,
+        "response_preview": "thought I think the word library means a building where people learn and read books. So, the word library means a building where people learn and read books. |imend| The Simplest Answer A library is a",
+        "hit_max_tokens": true
+      },
+      {
+        "prompt_index": 1,
+        "prompt_preview": "How do I introduce myself in English?",
+        "steps_total": 80,
+        "finished_pool_size": 0,
+        "words_scored": 35,
+        "kvl_beam_running_mean": 2.5288828571428565,
+        "response_time_seconds": 33.8,
+        "response_chars": 282,
+        "response_preview": "super easy, right? Just say, \"Hello, my name is [name] and I am [age] years old.\" That's all! [name] is my name. [age] is how old I am. [name] is my name again. [name] again is my name again. [name] a",
+        "hit_max_tokens": true
+      }
+    ]
+  },
+  {
+    "variant": "stop_length",
+    "length_penalty_alpha": 0.15,
+    "policy": {
+      "always_branch_stop_tokens": true,
+      "length_penalty_alpha": 0.15,
+      "prefer_finished_epsilon": 0.0,
+      "max_tokens_override": null
+    },
+    "observations": [
+      {
+        "prompt_index": 0,
+        "prompt_preview": "What does the word 'library' mean?",
+        "steps_total": 200,
+        "finished_pool_size": 4782,
+        "words_scored": 30,
+        "kvl_beam_running_mean": 3.174243333333334,
+        "response_time_seconds": 75.8,
+        "response_chars": 480,
+        "response_preview": "thought I think the word library means a building where people learn and read books. So, the word library means a building where people learn and read books. |imend| The Simplest Answer A library is a",
+        "hit_max_tokens": true
+      },
+      {
+        "prompt_index": 1,
+        "prompt_preview": "How do I introduce myself in English?",
+        "steps_total": 200,
+        "finished_pool_size": 4782,
+        "words_scored": 66,
+        "kvl_beam_running_mean": 2.8295257575757566,
+        "response_time_seconds": 76.9,
+        "response_chars": 568,
+        "response_preview": "super easy, right? Just say, \"Hello, my name is [name] and I am [age] years old.\" That's all! [name] is my name. [age] is how old I am. [name] is my name again. [name] again is my name again. [name] a",
+        "hit_max_tokens": true
+      }
+    ]
+  },
+  {
+    "variant": "stop_length",
+    "length_penalty_alpha": 0.25,
+    "policy": {
+      "always_branch_stop_tokens": true,
+      "length_penalty_alpha": 0.25,
+      "prefer_finished_epsilon": 0.0,
+      "max_tokens_override": null
+    },
+    "observations": [
+      {
+        "prompt_index": 0,
+        "prompt_preview": "What does the word 'library' mean?",
+        "steps_total": 200,
+        "finished_pool_size": 4782,
+        "words_scored": 14,
+        "kvl_beam_running_mean": 3.0134714285714286,
+        "response_time_seconds": 75.0,
+        "response_chars": 173,
+        "response_preview": "thought I think the word library means a building where people learn and read books. So, the word library means a building where people learn and read books. |imend| <|imend",
+        "hit_max_tokens": true
+      },
+      {
+        "prompt_index": 1,
+        "prompt_preview": "How do I introduce myself in English?",
+        "steps_total": 200,
+        "finished_pool_size": 4782,
+        "words_scored": 50,
+        "kvl_beam_running_mean": 2.7552859999999995,
+        "response_time_seconds": 76.9,
+        "response_chars": 409,
+        "response_preview": "super easy, right? Just say, \"Hello, my name is [name] and I am [age] years old.\" That's all! [name] is my name. [age] is how old I am. [name] is my name again. [name] again is my name again. [name] a",
+        "hit_max_tokens": true
+      }
+    ]
+  },
+  {
+    "variant": "stop_length",
+    "length_penalty_alpha": 0.35,
+    "policy": {
+      "always_branch_stop_tokens": true,
+      "length_penalty_alpha": 0.35,
+      "prefer_finished_epsilon": 0.0,
+      "max_tokens_override": null
+    },
+    "observations": [
+      {
+        "prompt_index": 0,
+        "prompt_preview": "What does the word 'library' mean?",
+        "steps_total": 200,
+        "finished_pool_size": 4782,
+        "words_scored": 7,
+        "kvl_beam_running_mean": 2.7390714285714286,
+        "response_time_seconds": 75.6,
+        "response_chars": 68,
+        "response_preview": "thought I think the word library means a building where people learn",
+        "hit_max_tokens": true
+      },
+      {
+        "prompt_index": 1,
+        "prompt_preview": "How do I introduce myself in English?",
+        "steps_total": 200,
+        "finished_pool_size": 4782,
+        "words_scored": 21,
+        "kvl_beam_running_mean": 2.5256047619047615,
+        "response_time_seconds": 76.7,
+        "response_chars": 197,
+        "response_preview": "super easy, right? Just say, \"Hello, my name is [name] and I am [age] years old.\" That's all! [name] is my name. [age] is how old I am. [name] is my name again. [name] again is my name again. [name",
+        "hit_max_tokens": true
+      }
+    ]
+  },
+  {
+    "variant": "stop_length",
+    "length_penalty_alpha": 0.5,
+    "policy": {
+      "always_branch_stop_tokens": true,
+      "length_penalty_alpha": 0.5,
+      "prefer_finished_epsilon": 0.0,
+      "max_tokens_override": null
+    },
+    "observations": [
+      {
+        "prompt_index": 0,
+        "prompt_preview": "What does the word 'library' mean?",
+        "steps_total": 200,
+        "finished_pool_size": 4782,
+        "words_scored": 7,
+        "kvl_beam_running_mean": 2.7390714285714286,
+        "response_time_seconds": 76.1,
+        "response_chars": 68,
+        "response_preview": "thought I think the word library means a building where people learn",
+        "hit_max_tokens": true
+      },
+      {
+        "prompt_index": 1,
+        "prompt_preview": "How do I introduce myself in English?",
+        "steps_total": 200,
+        "finished_pool_size": 4782,
+        "words_scored": 17,
+        "kvl_beam_running_mean": 2.4599705882352936,
+        "response_time_seconds": 77.3,
+        "response_chars": 166,
+        "response_preview": "super easy, right? Just say, \"Hello, my name is [name] and I am [age] years old.\" That's all! [name] is my name. [age] is how old I am. [name] is my name again. [name",
+        "hit_max_tokens": true
+      }
+    ]
+  },
+  {
+    "variant": "stop_length",
+    "length_penalty_alpha": 0.75,
+    "policy": {
+      "always_branch_stop_tokens": true,
+      "length_penalty_alpha": 0.75,
+      "prefer_finished_epsilon": 0.0,
+      "max_tokens_override": null
+    },
+    "observations": [
+      {
+        "prompt_index": 0,
+        "prompt_preview": "What does the word 'library' mean?",
+        "steps_total": 200,
+        "finished_pool_size": 4782,
+        "words_scored": 5,
+        "kvl_beam_running_mean": 2.6117999999999997,
+        "response_time_seconds": 75.7,
+        "response_chars": 49,
+        "response_preview": "thought I think the word library means a building",
+        "hit_max_tokens": true
+      },
+      {
+        "prompt_index": 1,
+        "prompt_preview": "How do I introduce myself in English?",
+        "steps_total": 200,
+        "finished_pool_size": 4782,
+        "words_scored": 9,
+        "kvl_beam_running_mean": 1.9976666666666665,
+        "response_time_seconds": 76.9,
+        "response_chars": 79,
+        "response_preview": "super easy, right? Just say, \"Hello, my name is [name] and I am [age] years old",
+        "hit_max_tokens": true
+      }
+    ]
+  },
+  {
+    "variant": "stop_length",
+    "length_penalty_alpha": 1.0,
+    "policy": {
+      "always_branch_stop_tokens": true,
+      "length_penalty_alpha": 1.0,
+      "prefer_finished_epsilon": 0.0,
+      "max_tokens_override": null
+    },
+    "observations": [
+      {
+        "prompt_index": 0,
+        "prompt_preview": "What does the word 'library' mean?",
+        "steps_total": 200,
+        "finished_pool_size": 4782,
+        "words_scored": 4,
+        "kvl_beam_running_mean": 2.423025,
+        "response_time_seconds": 75.4,
+        "response_chars": 32,
+        "response_preview": "thought I think the word library",
+        "hit_max_tokens": true
+      },
+      {
+        "prompt_index": 1,
+        "prompt_preview": "How do I introduce myself in English?",
+        "steps_total": 200,
+        "finished_pool_size": 4782,
+        "words_scored": 7,
+        "kvl_beam_running_mean": 1.7212571428571428,
+        "response_time_seconds": 76.7,
+        "response_chars": 53,
+        "response_preview": "super easy, right? Just say, \"Hello, my name is [name",
+        "hit_max_tokens": true
+      }
+    ]
+  },
+  {
+    "variant": "stop_length",
+    "length_penalty_alpha": 1.5,
+    "policy": {
+      "always_branch_stop_tokens": true,
+      "length_penalty_alpha": 1.5,
+      "prefer_finished_epsilon": 0.0,
+      "max_tokens_override": null
+    },
+    "observations": [
+      {
+        "prompt_index": 0,
+        "prompt_preview": "What does the word 'library' mean?",
+        "steps_total": 200,
+        "finished_pool_size": 4782,
+        "words_scored": 4,
+        "kvl_beam_running_mean": 2.423025,
+        "response_time_seconds": 75.2,
+        "response_chars": 32,
+        "response_preview": "thought I think the word library",
+        "hit_max_tokens": true
+      },
+      {
+        "prompt_index": 1,
+        "prompt_preview": "How do I introduce myself in English?",
+        "steps_total": 200,
+        "finished_pool_size": 4782,
+        "words_scored": 3,
+        "kvl_beam_running_mean": 0.5134333333333333,
+        "response_time_seconds": 76.7,
+        "response_chars": 17,
+        "response_preview": "super easy, right",
+        "hit_max_tokens": true
+      }
+    ]
+  },
+  {
+    "variant": "length_penalty",
+    "length_penalty_alpha": 0.5,
+    "policy": {
+      "always_branch_stop_tokens": false,
+      "length_penalty_alpha": 0.5,
+      "prefer_finished_epsilon": 0.0,
+      "max_tokens_override": null
+    },
+    "observations": [
+      {
+        "prompt_index": 0,
+        "prompt_preview": "What does the word 'library' mean?",
+        "steps_total": 200,
+        "finished_pool_size": 0,
+        "words_scored": 34,
+        "kvl_beam_running_mean": 3.2093205882352946,
+        "response_time_seconds": 74.1,
+        "response_chars": 735,
+        "response_preview": "thought I think the word library means a building where people learn and read books. So, the word library means a building where people learn and read books. |imend| The Simplest Answer A library is a",
+        "hit_max_tokens": true
+      },
+      {
+        "prompt_index": 1,
+        "prompt_preview": "How do I introduce myself in English?",
+        "steps_total": 200,
+        "finished_pool_size": 0,
+        "words_scored": 66,
+        "kvl_beam_running_mean": 2.8295257575757566,
+        "response_time_seconds": 72.1,
+        "response_chars": 571,
+        "response_preview": "super easy, right? Just say, \"Hello, my name is [name] and I am [age] years old.\" That's all! [name] is my name. [age] is how old I am. [name] is my name again. [name] again is my name again. [name] a",
+        "hit_max_tokens": true
+      }
+    ]
+  },
+  {
+    "variant": "length_penalty",
+    "length_penalty_alpha": 1.0,
+    "policy": {
+      "always_branch_stop_tokens": false,
+      "length_penalty_alpha": 1.0,
+      "prefer_finished_epsilon": 0.0,
+      "max_tokens_override": null
+    },
+    "observations": [
+      {
+        "prompt_index": 0,
+        "prompt_preview": "What does the word 'library' mean?",
+        "steps_total": 200,
+        "finished_pool_size": 0,
+        "words_scored": 34,
+        "kvl_beam_running_mean": 3.2093205882352946,
+        "response_time_seconds": 72.3,
+        "response_chars": 735,
+        "response_preview": "thought I think the word library means a building where people learn and read books. So, the word library means a building where people learn and read books. |imend| The Simplest Answer A library is a",
+        "hit_max_tokens": true
+      },
+      {
+        "prompt_index": 1,
+        "prompt_preview": "How do I introduce myself in English?",
+        "steps_total": 200,
+        "finished_pool_size": 0,
+        "words_scored": 66,
+        "kvl_beam_running_mean": 2.8295257575757566,
+        "response_time_seconds": 73.0,
+        "response_chars": 571,
+        "response_preview": "super easy, right? Just say, \"Hello, my name is [name] and I am [age] years old.\" That's all! [name] is my name. [age] is how old I am. [name] is my name again. [name] again is my name again. [name] a",
+        "hit_max_tokens": true
+      }
+    ]
+  },
+  {
+    "variant": "length_penalty",
+    "length_penalty_alpha": 1.5,
+    "policy": {
+      "always_branch_stop_tokens": false,
+      "length_penalty_alpha": 1.5,
+      "prefer_finished_epsilon": 0.0,
+      "max_tokens_override": null
+    },
+    "observations": [
+      {
+        "prompt_index": 0,
+        "prompt_preview": "What does the word 'library' mean?",
+        "steps_total": 200,
+        "finished_pool_size": 0,
+        "words_scored": 34,
+        "kvl_beam_running_mean": 3.2093205882352946,
+        "response_time_seconds": 71.4,
+        "response_chars": 735,
+        "response_preview": "thought I think the word library means a building where people learn and read books. So, the word library means a building where people learn and read books. |imend| The Simplest Answer A library is a",
+        "hit_max_tokens": true
+      },
+      {
+        "prompt_index": 1,
+        "prompt_preview": "How do I introduce myself in English?",
+        "steps_total": 200,
+        "finished_pool_size": 0,
+        "words_scored": 66,
+        "kvl_beam_running_mean": 2.8295257575757566,
+        "response_time_seconds": 74.0,
+        "response_chars": 571,
+        "response_preview": "super easy, right? Just say, \"Hello, my name is [name] and I am [age] years old.\" That's all! [name] is my name. [age] is how old I am. [name] is my name again. [name] again is my name again. [name] a",
+        "hit_max_tokens": true
+      }
+    ]
+  }
+]
