@@ -1,0 +1,2 @@
+Phase 2 kvl_beam:   0%|          | 0/3 [00:00<?, ?obs/s]llama_context: n_ctx_seq (2048) < n_ctx_train (40960) -- the full capacity of the model will not be utilized
+Qwen3 P1:   0%|          | 0/3 [00:00<?, ?obs/s]        Qwen3 P1:   0%|          | 0/3 [00:00<?, ?obs/s, l1=es, width=4]

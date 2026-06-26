@@ -1,0 +1,10 @@
+llama_context: n_ctx_seq (2048) < n_ctx_train (40960) -- the full capacity of the model will not be utilized
+Prompt tokens: 98
+User prompt: "What does the word 'library' mean?"
+
+Top-5 logits after prompt eval:
+  id=    91  logit=  18.333  text='|'
+  id=   318  logit=  17.893  text='im'
+  id= 60565  logit=  17.697  text='thought'
+  id= 14801  logit=  16.585  text='before'
+  id=  9522  logit=  16.509  text='super'

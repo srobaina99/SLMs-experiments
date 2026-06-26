@@ -29,6 +29,10 @@ class ExperimentConfig:
 
     kvl_l1: str = "es"
 
+    config_kvl_beam: bool = False
+    kvl_beam_width: int = 4
+    kvl_branch_factor: int = 10
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for storage."""
         return asdict(self)

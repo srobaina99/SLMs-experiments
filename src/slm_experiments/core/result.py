@@ -60,6 +60,14 @@ class ExperimentResult:
     beam_cumulative_logprob: Optional[float] = None
     beam_width: Optional[int] = None
 
+    kvl_beam_width: Optional[int] = None
+    kvl_branch_factor: Optional[int] = None
+    kvl_beam_steps_total: Optional[int] = None
+    kvl_beam_words_scored: Optional[int] = None
+    kvl_beam_running_mean: Optional[float] = None
+    kvl_beam_logprob_tiebreak: Optional[float] = None
+    kvl_beam_candidates_pruned: Optional[int] = None
+
     response_appropriateness: Optional[float] = None
     vocabulary_level: Optional[str] = None
     notes: Optional[str] = None
@@ -158,6 +166,49 @@ class ExperimentResult:
         result.beam_content_word_count = beam_content_word_count
         result.beam_cumulative_logprob = beam_cumulative_logprob
         result.beam_width = beam_width
+        return result
+
+    @classmethod
+    def create_from_kvl_beam_response(
+        cls,
+        prompt: str,
+        response: str,
+        config: ExperimentConfig,
+        response_time: float,
+        text_metrics: Dict[str, Any],
+        experiment_name: str = "default",
+        cleaned_response: str = "",
+        generation_successful: bool = True,
+        meets_a1_criteria: bool = False,
+        kvl_metrics: Optional[Dict[str, Any]] = None,
+        kvl_beam_width: int = 4,
+        kvl_branch_factor: int = 10,
+        kvl_beam_steps_total: int = 0,
+        kvl_beam_words_scored: int = 0,
+        kvl_beam_running_mean: Optional[float] = None,
+        kvl_beam_logprob_tiebreak: float = 0.0,
+        kvl_beam_candidates_pruned: int = 0,
+    ) -> "ExperimentResult":
+        """Create ExperimentResult from KVL beam search response data."""
+        result = cls.create_from_response(
+            prompt=prompt,
+            response=response,
+            config=config,
+            response_time=response_time,
+            text_metrics=text_metrics,
+            experiment_name=experiment_name,
+            cleaned_response=cleaned_response,
+            generation_successful=generation_successful,
+            meets_a1_criteria=meets_a1_criteria,
+            kvl_metrics=kvl_metrics,
+        )
+        result.kvl_beam_width = kvl_beam_width
+        result.kvl_branch_factor = kvl_branch_factor
+        result.kvl_beam_steps_total = kvl_beam_steps_total
+        result.kvl_beam_words_scored = kvl_beam_words_scored
+        result.kvl_beam_running_mean = kvl_beam_running_mean
+        result.kvl_beam_logprob_tiebreak = kvl_beam_logprob_tiebreak
+        result.kvl_beam_candidates_pruned = kvl_beam_candidates_pruned
         return result
 
     def to_dict(self) -> Dict[str, Any]:

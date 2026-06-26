@@ -80,6 +80,11 @@ def _group_column(experiment: str, df: pd.DataFrame) -> Tuple[str, List[str]]:
         order = sorted(df["group"].unique(), key=int)
         return "group", order
 
+    if experiment == "kvl_beam" and "kvl_beam_width" in df.columns:
+        df["group"] = df["kvl_beam_width"].astype(int).astype(str)
+        order = sorted(df["group"].unique(), key=int)
+        return "group", order
+
     if experiment == "prompting" and "num_shots" in df.columns:
         df["group"] = df["num_shots"].astype(int).astype(str)
         order = sorted(df["group"].unique(), key=int)
@@ -194,6 +199,7 @@ def plot_run(
         "factorial": "Intervention",
         "weights": "Weight factor",
         "beam": "Beam width",
+        "kvl_beam": "KVL beam width",
         "prompting": "Prompt shots",
     }.get(experiment, "Configuration")
 

@@ -1,0 +1,3 @@
+Phase 2 kvl_beam:   0%|          | 0/3 [00:00<?, ?obs/s]llama_context: n_ctx_seq (2048) < n_ctx_train (40960) -- the full capacity of the model will not be utilized
+Qwen3 P1:   0%|          | 0/3 [00:07<?, ?obs/s]        Qwen3 P1:   0%|          | 0/3 [00:07<?, ?obs/s, l1=es, width=4]/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/multiprocessing/resource_tracker.py:216: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '

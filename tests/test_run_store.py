@@ -54,6 +54,28 @@ class MockBeamModelWrapper:
         }
 
 
+class MockKvlBeamModelWrapper:
+    def generate_kvl_beam(
+        self,
+        prompt: str,
+        config: ExperimentConfig,
+        beam_width: int = 4,
+        branch_factor: int = 10,
+    ) -> dict:
+        return {
+            "response": SIMPLE_RESPONSE,
+            "response_time_seconds": 2.0,
+            "generation_successful": True,
+            "kvl_beam_width": beam_width,
+            "kvl_branch_factor": branch_factor,
+            "kvl_beam_steps_total": 30,
+            "kvl_beam_words_scored": 5,
+            "kvl_beam_running_mean": 2.0,
+            "kvl_beam_logprob_tiebreak": -1.0,
+            "kvl_beam_candidates_pruned": 80,
+        }
+
+
 class MockComplexModel:
     def generate(self, prompt: str, config: ExperimentConfig) -> dict:
         return {
@@ -326,6 +348,48 @@ class TestRunStore:
         assert summary["by_beam_width"]["8"]["count"] == 1
         assert summary["by_beam_width"]["4"]["flesch_kincaid_grade"]["mean"] == 3.5
         assert list(summary["by_config"].keys()) == ["prompting_only"]
+
+    def test_summary_includes_kvl_beam_width_buckets(self, tmp_path: Path):
+        pipeline = ExperimentPipeline()
+        model = MockKvlBeamModelWrapper()
+
+        def _result(kvl_beam_width: int, fk: float) -> ExperimentResult:
+            config = ExperimentConfig(
+                model_name="Qwen3",
+                config_weighting=False,
+                config_prompting=True,
+                config_kvl_beam=True,
+                prompt_id="p01",
+                experiment_name=f"Qwen3_kvl_beam_w{kvl_beam_width}",
+            )
+            result = pipeline.run_kvl_beam(
+                "What is a friend?",
+                config,
+                model,
+                beam_width=kvl_beam_width,
+            )
+            result.flesch_kincaid_grade = fk
+            result.meets_a1_criteria = True
+            return result
+
+        results = [_result(4, 4.0), _result(8, 3.5), _result(4, 3.0)]
+        store = RunStore(tmp_path)
+        run_id = make_run_id(2, "kvl_beam")
+        out_dir = store.write_bundle(
+            run_id, results, phase=2, experiment="kvl_beam"
+        )
+        summary = json.loads((out_dir / "summary.json").read_text())
+
+        assert summary["metadata"]["sweep_dimension"] == "kvl_beam_width"
+        assert summary["metadata"]["sweep_values"] == ["4", "8"]
+        assert summary["by_kvl_beam_width"]["4"]["count"] == 2
+        assert summary["by_kvl_beam_width"]["8"]["count"] == 1
+        assert summary["by_kvl_beam_width"]["4"]["a1_pass_rate"] == 1.0
+        assert summary["by_kvl_beam_width"]["4"]["flesch_kincaid_grade"]["mean"] == 3.5
+
+        full = pd.read_csv(out_dir / "full.csv")
+        assert "kvl_beam_width" in full.columns
+        assert set(full["kvl_beam_width"].tolist()) == {4, 8}
 
     def test_read_manifest_and_summary(self, tmp_path: Path):
         results = _make_results()
