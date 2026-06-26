@@ -213,6 +213,39 @@ class TestCliPhase2Run:
 
         assert mock_runner.run.call_args.kwargs["no_plot"] is True
 
+    @patch("slm_experiments.phase2.guided.GuidedSweepRunner")
+    def test_phase2_run_guided_dispatches(self, mock_runner_cls, capsys):
+        mock_runner = mock_runner_cls.return_value
+        mock_runner.run.return_value = (
+            "20260606_120000_phase2_guided",
+            Path("/tmp/run"),
+        )
+
+        main(["phase2", "guided", "--top-k-pools", "5,10,20", "--seed", "7"])
+
+        mock_runner.run.assert_called_once_with(
+            top_k_pools="5,10,20",
+            prompts="3",
+            models="all",
+            seed=7,
+            no_plot=False,
+            cli_args=["phase2", "guided", "--top-k-pools", "5,10,20", "--seed", "7"],
+            mode="flat",
+        )
+
+        captured = capsys.readouterr()
+        assert "20260606_120000_phase2_guided" in captured.out
+
+    @patch("slm_experiments.phase2.guided.GuidedSweepRunner")
+    def test_phase2_run_guided_mode_and_no_plot(self, mock_runner_cls):
+        mock_runner = mock_runner_cls.return_value
+        mock_runner.run.return_value = ("run_id", Path("/tmp/run"))
+
+        main(["phase2", "guided", "--mode", "trie", "--no-plot"])
+
+        assert mock_runner.run.call_args.kwargs["mode"] == "trie"
+        assert mock_runner.run.call_args.kwargs["no_plot"] is True
+
 
 class TestCliHuman:
     @patch("slm_experiments.human.export.HumanExporter")

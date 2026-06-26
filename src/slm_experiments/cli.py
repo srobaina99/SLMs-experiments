@@ -17,6 +17,7 @@ Quick start
 Phase 2 sweeps
   slm_experiments phase2 weights
   slm_experiments phase2 beam --widths 4,8,10
+  slm_experiments phase2 guided --top-k-pools 5,10,20
   slm_experiments phase2 prompting --shots 0,1,3
 
 Human review
@@ -108,12 +109,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p2 = subparsers.add_parser(
         "phase2",
-        help="Phase 2 hyperparameter sweeps (weights, beam, prompting)",
+        help="Phase 2 hyperparameter sweeps (weights, beam, guided, prompting)",
         description="Run one Phase 2 sweep. Pick a sweep type as the next argument.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=_examples(
             "slm_experiments phase2 weights",
             "slm_experiments phase2 beam --widths 4,8,10",
+            "slm_experiments phase2 guided --top-k-pools 5,10,20",
             "slm_experiments phase2 prompting --shots 0,1,3 --prompts all",
         ),
     )
@@ -156,6 +158,33 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Comma-separated beam widths (default: %(default)s)",
     )
     _add_run_options(p2_beam)
+
+    p2_guided = p2_sub.add_parser(
+        "guided",
+        help="Sweep guided decoding top-k pool sizes (A1-constrained greedy)",
+        description=(
+            "Sweep guided_top_k pool size while using top-k A1-constrained greedy decoding."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_examples(
+            "slm_experiments phase2 guided",
+            "slm_experiments phase2 guided --top-k-pools 5,10,20",
+            "slm_experiments phase2 guided --mode trie --models Qwen3 --prompts all",
+        ),
+    )
+    p2_guided.add_argument(
+        "--top-k-pools",
+        default="5,10,20",
+        metavar="VALUES",
+        help="Comma-separated guided top-k pool sizes (default: %(default)s)",
+    )
+    p2_guided.add_argument(
+        "--mode",
+        default="flat",
+        choices=["flat", "trie"],
+        help="Guided decoding mode (default: %(default)s)",
+    )
+    _add_run_options(p2_guided)
 
     p2_prompting = p2_sub.add_parser(
         "prompting",
@@ -352,6 +381,23 @@ def main(argv: list[str] | None = None) -> None:
             print(f"Output: {Path(out_dir).resolve()}")
             return
 
+        if args.sweep == "guided":
+            from slm_experiments.phase2.guided import GuidedSweepRunner
+
+            runner = GuidedSweepRunner()
+            run_id, out_dir = runner.run(
+                top_k_pools=args.top_k_pools,
+                prompts=args.prompts,
+                models=args.models,
+                seed=args.seed,
+                no_plot=args.no_plot,
+                cli_args=cli_args,
+                mode=args.mode,
+            )
+            print(f"Run complete: {run_id}")
+            print(f"Output: {Path(out_dir).resolve()}")
+            return
+
         print(f"Not implemented: phase2 {args.sweep}", file=sys.stderr)
         sys.exit(1)
 
@@ -463,6 +509,7 @@ def main(argv: list[str] | None = None) -> None:
             "weight_factor": "by_weight_factor",
             "beam_width": "by_beam_width",
             "num_shots": "by_num_shots",
+            "guided_top_k": "by_guided_top_k",
         }
         sweep_section = sweep_sections.get(sweep_dimension or "")
         sweep_stats = summary.get(sweep_section or "", {})

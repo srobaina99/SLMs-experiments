@@ -14,8 +14,12 @@ class ExperimentConfig:
 
     config_weighting: bool = False
     config_prompting: bool = False
+    config_guided: bool = False
     weight_factor: float = 1.0
     num_shots: int = 0
+
+    guided_top_k: int = 10
+    guided_mode: str = "flat"
 
     prompt_id: str = ""
 

@@ -54,6 +54,20 @@ class MockBeamModelWrapper:
         }
 
 
+class MockGuidedModelWrapper:
+    def generate_guided(self, prompt: str, config: ExperimentConfig) -> dict:
+        return {
+            "response": SIMPLE_RESPONSE,
+            "response_time_seconds": 2.0,
+            "generation_successful": True,
+            "guided_top_k": config.guided_top_k,
+            "guided_mode": config.guided_mode,
+            "guided_steps_a1_chosen": 5,
+            "guided_steps_total": 20,
+            "guided_intervention_rate": 0.25,
+        }
+
+
 class MockComplexModel:
     def generate(self, prompt: str, config: ExperimentConfig) -> dict:
         return {
@@ -325,6 +339,37 @@ class TestRunStore:
         assert summary["by_beam_width"]["4"]["count"] == 2
         assert summary["by_beam_width"]["8"]["count"] == 1
         assert summary["by_beam_width"]["4"]["flesch_kincaid_grade"]["mean"] == 3.5
+        assert list(summary["by_config"].keys()) == ["prompting_only"]
+
+    def test_summary_includes_guided_top_k_buckets(self, tmp_path: Path):
+        pipeline = ExperimentPipeline()
+        model = MockGuidedModelWrapper()
+
+        def _result(guided_top_k: int, fk: float) -> ExperimentResult:
+            config = ExperimentConfig(
+                model_name="Qwen3",
+                config_weighting=False,
+                config_prompting=True,
+                config_guided=True,
+                guided_top_k=guided_top_k,
+                guided_mode="flat",
+                prompt_id="p01",
+                experiment_name=f"Qwen3_guided_k{guided_top_k}",
+            )
+            result = pipeline.run_guided(
+                "What is a friend?", config, model
+            )
+            result.flesch_kincaid_grade = fk
+            return result
+
+        results = [_result(5, 4.0), _result(10, 3.5), _result(5, 3.0)]
+        summary = compute_summary_stats(results, experiment="guided")
+
+        assert summary["metadata"]["sweep_dimension"] == "guided_top_k"
+        assert summary["metadata"]["sweep_values"] == ["5", "10"]
+        assert summary["by_guided_top_k"]["5"]["count"] == 2
+        assert summary["by_guided_top_k"]["10"]["count"] == 1
+        assert summary["by_guided_top_k"]["5"]["flesch_kincaid_grade"]["mean"] == 3.5
         assert list(summary["by_config"].keys()) == ["prompting_only"]
 
     def test_read_manifest_and_summary(self, tmp_path: Path):

@@ -14,7 +14,9 @@ from slm_experiments.models.base import (
     resolve_gguf_dir,
     timeout_context,
 )
+from slm_experiments.models.a1_token_index import A1TokenIndex
 from slm_experiments.models.beam import BeamSearchGenerator
+from slm_experiments.models.constrained_decoder import ConstrainedDecoder
 
 try:
     from llama_cpp import Llama
@@ -50,6 +52,7 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
         self.seed = seed
         self.llm = None
         self.model_loaded = False
+        self._a1_token_index_cache: Dict[str, A1TokenIndex] = {}
 
         super().__init__(model_name, timeout_seconds, vocab_path=vocab_path)
         self._initialize_model()
@@ -103,6 +106,16 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
         """Extract assistant text from raw model output."""
         pass
 
+    def _get_a1_token_index(self, *, use_trie: bool = False) -> A1TokenIndex:
+        cache_key = "trie" if use_trie else "flat"
+        if cache_key not in self._a1_token_index_cache:
+            self._a1_token_index_cache[cache_key] = A1TokenIndex.build(
+                self.llm,
+                self.target_vocabulary,
+                use_trie=use_trie,
+            )
+        return self._a1_token_index_cache[cache_key]
+
     def _create_logit_bias(
         self, vocab: List[str], weight_factor: float
     ) -> Dict[int, float]:
@@ -116,17 +129,8 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
             return {}
 
         bias_value = math.log(weight_factor)
-        logit_bias: Dict[int, float] = {}
-        for word in vocab:
-            try:
-                tokens = self.llm.tokenize(
-                    (" " + word).encode("utf-8"), add_bos=False
-                )
-                for token_id in tokens:
-                    logit_bias[token_id] = bias_value
-            except Exception:
-                continue
-        return logit_bias
+        index = A1TokenIndex.build(self.llm, vocab, use_trie=False)
+        return {token_id: bias_value for token_id in index.mid_sentence_ids}
 
     def _prepare_beam_scoring_text(self, raw_output: str) -> str:
         """Extract and clean beam candidate text before A1-ratio scoring."""
@@ -399,12 +403,187 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
                 "beam_cumulative_logprob": 0.0,
             }
 
+    def generate_guided(
+        self,
+        prompt: str,
+        config: ExperimentConfig,
+    ) -> Dict[str, Any]:
+        """
+        Generate via top-K A1-constrained greedy decoding.
+
+        Returns response, guided metadata, response_time_seconds, generation_successful.
+        """
+        start_time = time.time()
+        try:
+            with timeout_context(self.timeout_seconds):
+                result = self._generate_guided_impl(prompt, config)
+        except TimeoutError:
+            return self._guided_failure_response(
+                config,
+                float(self.timeout_seconds),
+                f"Generation timed out after {self.timeout_seconds} seconds",
+            )
+        except Exception as exc:
+            return self._guided_failure_response(
+                config,
+                time.time() - start_time,
+                str(exc),
+            )
+
+        response = result.get("response") or ""
+        cleaned = self.response_formatter.clean_response_for_evaluation(response)
+        successful = bool(result.get("generation_successful", False)) and bool(
+            cleaned.strip()
+        )
+
+        return {
+            "response": response,
+            "response_time_seconds": float(
+                result.get("response_time_seconds", time.time() - start_time)
+            ),
+            "generation_successful": successful,
+            "error_message": result.get("error_message", ""),
+            "guided_top_k": result.get("guided_top_k", config.guided_top_k),
+            "guided_mode": result.get("guided_mode", config.guided_mode),
+            "guided_steps_a1_chosen": result.get("guided_steps_a1_chosen", 0),
+            "guided_steps_total": result.get("guided_steps_total", 0),
+            "guided_steps_fallback_argmax": result.get(
+                "guided_steps_fallback_argmax", 0
+            ),
+            "guided_steps_no_a1_in_pool": result.get(
+                "guided_steps_no_a1_in_pool", 0
+            ),
+            "guided_intervention_rate": result.get("guided_intervention_rate", 0.0),
+        }
+
+    def _guided_failure_response(
+        self,
+        config: ExperimentConfig,
+        elapsed: float,
+        error_message: str,
+    ) -> Dict[str, Any]:
+        return {
+            "response": "",
+            "response_time_seconds": elapsed,
+            "generation_successful": False,
+            "error_message": error_message,
+            "guided_top_k": config.guided_top_k,
+            "guided_mode": config.guided_mode,
+            "guided_steps_a1_chosen": 0,
+            "guided_steps_total": 0,
+            "guided_steps_fallback_argmax": 0,
+            "guided_steps_no_a1_in_pool": 0,
+            "guided_intervention_rate": 0.0,
+        }
+
+    def _generate_guided_impl(
+        self,
+        prompt: str,
+        config: ExperimentConfig,
+    ) -> Dict[str, Any]:
+        if not self.model_loaded or self.llm is None:
+            return {
+                "response": "",
+                "response_time_seconds": 0.0,
+                "generation_successful": False,
+                "error_message": f"{self.model_name} model not loaded",
+                "guided_top_k": config.guided_top_k,
+                "guided_mode": config.guided_mode,
+                "guided_steps_a1_chosen": 0,
+                "guided_steps_total": 0,
+                "guided_steps_fallback_argmax": 0,
+                "guided_steps_no_a1_in_pool": 0,
+                "guided_intervention_rate": 0.0,
+            }
+
+        start_time = time.time()
+        try:
+            final_prompt = prompt
+            if config.config_prompting:
+                final_prompt = self._add_simplification_context(
+                    prompt, num_shots=config.num_shots
+                )
+
+            formatted_prompt = self._format_prompt(final_prompt, config.system_prompt)
+            use_trie = config.guided_mode == "trie"
+            index = self._get_a1_token_index(use_trie=use_trie)
+            prompt_token_ids = self.llm.tokenize(
+                formatted_prompt.encode("utf-8"), add_bos=True
+            )
+
+            decode_result = ConstrainedDecoder().decode(
+                self.llm,
+                list(prompt_token_ids),
+                max_tokens=config.max_new_tokens,
+                stop=self._get_stop_tokens(),
+                guided_pool_size=config.guided_top_k,
+                index=index,
+                mode=config.guided_mode,
+                temperature=config.temperature,
+                top_k=config.top_k,
+                top_p=config.top_p,
+            )
+
+            raw_response = decode_result.text
+            response = self._extract_response(raw_response)
+            response = self.response_formatter.clean_response_for_evaluation(response)
+
+            intervention_rate = (
+                decode_result.steps_a1_chosen / decode_result.steps_total
+                if decode_result.steps_total > 0
+                else 0.0
+            )
+
+            if not response.strip():
+                return {
+                    "response": response,
+                    "response_time_seconds": time.time() - start_time,
+                    "generation_successful": False,
+                    "error_message": "Empty generation",
+                    "guided_top_k": config.guided_top_k,
+                    "guided_mode": config.guided_mode,
+                    "guided_steps_a1_chosen": decode_result.steps_a1_chosen,
+                    "guided_steps_total": decode_result.steps_total,
+                    "guided_steps_fallback_argmax": decode_result.steps_fallback_argmax,
+                    "guided_steps_no_a1_in_pool": decode_result.steps_no_a1_in_pool,
+                    "guided_intervention_rate": intervention_rate,
+                }
+
+            return {
+                "response": response,
+                "response_time_seconds": time.time() - start_time,
+                "generation_successful": True,
+                "error_message": "",
+                "guided_top_k": config.guided_top_k,
+                "guided_mode": config.guided_mode,
+                "guided_steps_a1_chosen": decode_result.steps_a1_chosen,
+                "guided_steps_total": decode_result.steps_total,
+                "guided_steps_fallback_argmax": decode_result.steps_fallback_argmax,
+                "guided_steps_no_a1_in_pool": decode_result.steps_no_a1_in_pool,
+                "guided_intervention_rate": intervention_rate,
+            }
+        except Exception as exc:
+            return {
+                "response": "",
+                "response_time_seconds": time.time() - start_time,
+                "generation_successful": False,
+                "error_message": str(exc),
+                "guided_top_k": config.guided_top_k,
+                "guided_mode": config.guided_mode,
+                "guided_steps_a1_chosen": 0,
+                "guided_steps_total": 0,
+                "guided_steps_fallback_argmax": 0,
+                "guided_steps_no_a1_in_pool": 0,
+                "guided_intervention_rate": 0.0,
+            }
+
     def cleanup(self):
         """Release llama.cpp model resources."""
         if self.llm is not None:
             del self.llm
             self.llm = None
             self.model_loaded = False
+        self._a1_token_index_cache.clear()
 
 
 def default_gguf_path(filename: str) -> str:
