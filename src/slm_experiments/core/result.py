@@ -51,6 +51,12 @@ class ExperimentResult:
     beam_cumulative_logprob: Optional[float] = None
     beam_width: Optional[int] = None
 
+    guided_top_k: Optional[int] = None
+    guided_mode: Optional[str] = None
+    guided_steps_a1_chosen: Optional[int] = None
+    guided_steps_total: Optional[int] = None
+    guided_intervention_rate: Optional[float] = None
+
     response_appropriateness: Optional[float] = None
     vocabulary_level: Optional[str] = None
     notes: Optional[str] = None
@@ -137,6 +143,43 @@ class ExperimentResult:
         result.beam_content_word_count = beam_content_word_count
         result.beam_cumulative_logprob = beam_cumulative_logprob
         result.beam_width = beam_width
+        return result
+
+    @classmethod
+    def create_from_guided_response(
+        cls,
+        prompt: str,
+        response: str,
+        config: ExperimentConfig,
+        response_time: float,
+        text_metrics: Dict[str, Any],
+        experiment_name: str = "default",
+        cleaned_response: str = "",
+        generation_successful: bool = True,
+        meets_a1_criteria: bool = False,
+        guided_top_k: int = 10,
+        guided_mode: str = "flat",
+        guided_steps_a1_chosen: int = 0,
+        guided_steps_total: int = 0,
+        guided_intervention_rate: float = 0.0,
+    ) -> "ExperimentResult":
+        """Create ExperimentResult from guided decoding response data."""
+        result = cls.create_from_response(
+            prompt=prompt,
+            response=response,
+            config=config,
+            response_time=response_time,
+            text_metrics=text_metrics,
+            experiment_name=experiment_name,
+            cleaned_response=cleaned_response,
+            generation_successful=generation_successful,
+            meets_a1_criteria=meets_a1_criteria,
+        )
+        result.guided_top_k = guided_top_k
+        result.guided_mode = guided_mode
+        result.guided_steps_a1_chosen = guided_steps_a1_chosen
+        result.guided_steps_total = guided_steps_total
+        result.guided_intervention_rate = guided_intervention_rate
         return result
 
     def to_dict(self) -> Dict[str, Any]:
