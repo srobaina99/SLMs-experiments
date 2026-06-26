@@ -81,8 +81,8 @@ Avoid complex grammar structures and difficult words.
 | Shots | Examples added before target question |
 |-------|--------------------------------------|
 | 0 | Context block only |
-| 1 | + "What is a cat?" / "A cat is a small animal..." |
-| 3 | + cat, happy, water examples |
+| 1 | + definition example ("What is a cat?") |
+| 3 | + how-to example ("How do you ask for help…?") and listing example ("What can I find in a park?") |
 
 Weighting and beam disabled during prompting sweep.
 

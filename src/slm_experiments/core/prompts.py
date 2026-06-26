@@ -67,18 +67,20 @@ CONTEXT_BLOCK = (
 )
 
 SHOT_EXAMPLES = [
+    # Definition (What is …?)
     (
         "Question: What is a cat?\n"
         "Answer: A cat is a small animal. It is soft and likes to play and sleep."
     ),
+    # How-to / phrase (How do you …?)
     (
-        "Question: What does 'happy' mean?\n"
-        "Answer: Happy means you feel good. You smile when you are happy. "
-        "Happy is a nice feeling."
+        "Question: How do you ask for help in English?\n"
+        "Answer: You can say \"Can you help me, please?\" People use this when they need help."
     ),
+    # Listing / place (What can I find …?)
     (
-        "Question: What is water?\n"
-        "Answer: Water is a drink. We need water every day."
+        "Question: What can I find in a park?\n"
+        "Answer: You can find grass, trees, and benches in a park. Children play there."
     ),
 ]
 

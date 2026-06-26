@@ -188,7 +188,15 @@ Question: What is a cat?
 Answer: A cat is a small animal. It is soft and likes to play and sleep.
 ```
 
-**Few-shot adds two more examples** (happy, water) before the target question.
+**Few-shot adds two more examples** (how-to and listing) before the target question:
+
+```
+Question: How do you ask for help in English?
+Answer: You can say "Can you help me, please?" People use this when they need help.
+
+Question: What can I find in a park?
+Answer: You can find grass, trees, and benches in a park. Children play there.
+```
 
 ## Output Format
 

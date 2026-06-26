@@ -9,6 +9,7 @@ import pytest
 from slm_experiments.core.prompts import (
     MODEL_CONFIGS,
     SHOT_EXAMPLES,
+    STANDARD_PROMPTS,
     build_contextual_prompt,
 )
 from slm_experiments.phase2.prompting import (
@@ -62,6 +63,14 @@ class TestBuildContextualPrompt:
     def test_invalid_shot_count(self):
         with pytest.raises(ValueError, match="exceeds available"):
             build_contextual_prompt("Hi", num_shots=99)
+
+    def test_shot_examples_do_not_overlap_evaluation_prompts(self):
+        shot_questions = {
+            example.split("\n", maxsplit=1)[0].removeprefix("Question: ")
+            for example in SHOT_EXAMPLES
+        }
+        overlap = shot_questions & set(STANDARD_PROMPTS)
+        assert not overlap, f"Few-shot examples must not match evaluation prompts: {overlap}"
 
 
 class TestPromptingConfigs:

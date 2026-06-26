@@ -10,7 +10,7 @@ Multi-model adversarial review of the SLM experimentation framework (Claude Opus
 
 The experimental structure is sound — a 2×2 factorial for Phase 1 and one-at-a-time sweeps for Phase 2 are appropriate designs. **Core implementation gaps that invalidated weighting, beam, and A1 measurement have been fixed in git** (see [Fixes landed in git](#fixes-landed-in-git)).
 
-Remaining work is mostly **methodological rigor and reporting** (model-stratified summaries, beam candidate diversity, few-shot leakage, doc/code alignment on temperature), not broken inference paths.
+Remaining work is mostly **methodological rigor and reporting** (model-stratified summaries, beam candidate diversity, doc/code alignment on temperature), not broken inference paths.
 
 | Aspect | Assessment |
 |--------|------------|
@@ -57,7 +57,7 @@ Remaining work is mostly **methodological rigor and reporting** (model-stratifie
 
 | # | Issue | Status | Notes |
 |---|-------|--------|-------|
-| 9 | **Prompting few-shot leakage** | Open | `SHOT_EXAMPLES` includes “What does 'happy' mean?” and `STANDARD_PROMPTS` has the same prompt (P6) |
+| 9 | **Prompting few-shot leakage** | **Fixed** | Varied shot examples (definition, how-to, descriptive); none overlap evaluation prompts |
 | 10 | **Stochastic RNG advances across conditions** | Open | One seed per model, sequential loop at temp=0.7; condition order can entangle with sampling noise |
 | 11 | **Phase 2 weight sweep: docs say greedy, code uses temp=0.7** | Open | Doc/code mismatch in `ExperimentDesign.md` vs `phase2/weights.py` |
 | 12 | **`weight_factor=1.0` still passes zero-bias dict** | Open | Unlike `logit_bias=None` when weighting off; baseline in weight sweep ≠ Phase 1 `prompting_only` |
@@ -130,7 +130,7 @@ Documented in `ExperimentDesign.md` and `AGENT.md`. For any claim about interven
 | 7 | Per-observation seeds — `hash(model, prompt, config, rep)` | **Open** |
 | 8 | Report failure rate alongside means | **Partial** (`1207c3d`) — `generation_successful_count` added |
 | 9 | Add `by_model` × sweep breakdown in `summary.json` | **Open** |
-| 10 | Disjoint few-shot examples from evaluation prompts | **Open** |
+| 10 | Disjoint few-shot examples from evaluation prompts | **Done** |
 | 11 | Align weight sweep with docs — greedy temp or update docs | **Open** |
 
 ### Tier 3 — Analysis & reporting
