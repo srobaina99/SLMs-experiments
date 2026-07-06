@@ -28,6 +28,11 @@ does not appear in the returned text. Stop strings are **not** tokenized into
 ``stop_token_ids`` (BPE splits like ``"<|im_end|>"`` would false-trigger on
 fragments such as token 91 ``"|"``).
 
+The decode loop returns the **first** candidate that hits a stop condition
+(token ID or string suffix), in beam expansion order, without comparing
+finished hypotheses at the end. If no candidate finishes before ``max_tokens``,
+the best surviving active beam is returned.
+
 Incremental eval (eval prompt once, then eval one token) is reserved for
 single-path greedy smoke tests only — beam branches require independent KV
 state via reset between prefixes.
@@ -153,7 +158,6 @@ class KvlBeamDecoder:
                 cumulative_logprob=0.0,
             )
         ]
-        finished_pool: list[KvlBeamCandidate] = []
         candidates_pruned = 0
         steps_total = 0
 
@@ -178,41 +182,54 @@ class KvlBeamDecoder:
                         stop_token_ids=stop_token_ids,
                         decode_suffix=decode_suffix,
                     )
+                    if child.finished:
+                        return self._build_decode_result(
+                            child,
+                            prompt_token_ids,
+                            steps_total=steps_total,
+                            candidates_pruned=candidates_pruned,
+                        )
                     children.append(child)
 
-            unfinished = [child for child in children if not child.finished]
-            finished = [child for child in children if child.finished]
-            finished_pool.extend(finished)
-
-            unfinished.sort(key=self._rank_key, reverse=True)
-            candidates_pruned += max(0, len(unfinished) - self.beam_width)
-            active_beams = unfinished[: self.beam_width]
-
-            if not active_beams and finished_pool:
-                break
+            children.sort(key=self._rank_key, reverse=True)
+            candidates_pruned += max(0, len(children) - self.beam_width)
+            active_beams = children[: self.beam_width]
 
         for beam in active_beams:
             self._flush_candidate_words(beam)
 
-        all_candidates = finished_pool + active_beams
-        if not all_candidates:
-            root = KvlBeamCandidate(
+        if not active_beams:
+            best = KvlBeamCandidate(
                 token_ids=list(prompt_token_ids),
                 text="",
                 cumulative_logprob=0.0,
             )
-            best = root
         else:
-            best = max(all_candidates, key=self._rank_key)
+            best = max(active_beams, key=self._rank_key)
 
-        generated_ids = best.token_ids[len(prompt_token_ids) :]
+        return self._build_decode_result(
+            best,
+            prompt_token_ids,
+            steps_total=steps_total,
+            candidates_pruned=candidates_pruned,
+        )
+
+    @staticmethod
+    def _build_decode_result(
+        candidate: KvlBeamCandidate,
+        prompt_token_ids: list[int],
+        *,
+        steps_total: int,
+        candidates_pruned: int,
+    ) -> KvlBeamDecodeResult:
+        generated_ids = candidate.token_ids[len(prompt_token_ids) :]
         return KvlBeamDecodeResult(
             token_ids=generated_ids,
-            text=best.text,
-            cumulative_logprob=best.cumulative_logprob,
+            text=candidate.text,
+            cumulative_logprob=candidate.cumulative_logprob,
             steps_total=steps_total,
-            words_scored=len(best.kvl_scores),
-            running_mean=best.kvl_running_mean(),
+            words_scored=len(candidate.kvl_scores),
+            running_mean=candidate.kvl_running_mean(),
             candidates_pruned=candidates_pruned,
         )
 

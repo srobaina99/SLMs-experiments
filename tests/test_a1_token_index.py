@@ -44,6 +44,22 @@ class TestA1TokenIndexBuild:
         assert index.id_to_words[20] == ("cat",)
         assert index.id_to_words[21] == ("cat",)
 
+    def test_build_includes_stop_token_ids_in_both_context_sets(self):
+        llm = _make_tokenizer(
+            {
+                " hello": [10],
+                "hello": [11],
+            }
+        )
+        index = A1TokenIndex.build(
+            llm, ["hello"], use_trie=False, stop_token_ids=frozenset({99, 100})
+        )
+
+        assert index.mid_sentence_ids == frozenset({10, 99, 100})
+        assert index.sentence_start_ids == frozenset({11, 99, 100})
+        assert index.id_to_words[99] == ("<stop>",)
+        assert index.id_to_words[100] == ("<stop>",)
+
     def test_build_with_trie_attaches_trie(self):
         llm = _make_tokenizer(
             {

@@ -80,7 +80,14 @@ class A1TokenIndex:
     trie: Optional[A1TokenTrie] = None
 
     @classmethod
-    def build(cls, llm, vocab: List[str], *, use_trie: bool = False) -> A1TokenIndex:
+    def build(
+        cls,
+        llm,
+        vocab: List[str],
+        *,
+        use_trie: bool = False,
+        stop_token_ids: FrozenSet[int] | None = None,
+    ) -> A1TokenIndex:
         mid_sentence_ids: set[int] = set()
         sentence_start_ids: set[int] = set()
         id_to_words: Dict[int, List[str]] = {}
@@ -100,6 +107,11 @@ class A1TokenIndex:
                     start_sequences[word] = start_tokens
             except Exception:
                 continue
+
+        for token_id in stop_token_ids or ():
+            mid_sentence_ids.add(token_id)
+            sentence_start_ids.add(token_id)
+            id_to_words.setdefault(token_id, []).append("<stop>")
 
         id_to_words_final = {
             token_id: tuple(sorted(set(words)))

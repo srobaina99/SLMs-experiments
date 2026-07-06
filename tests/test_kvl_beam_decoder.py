@@ -278,7 +278,6 @@ class TestKvlBeamDecoderStopTokens:
             prefix = tuple(token_ids[prompt_len:])
             if prefix == ():
                 step_logits[TOK_FRIEND] = 10.0
-                step_logits[TOK_STOP] = -500.0
             elif prefix == (TOK_FRIEND,):
                 step_logits[TOK_STOP] = -500.0
             return step_logits, _suffix(token_ids, prompt_len)
@@ -301,4 +300,42 @@ class TestKvlBeamDecoderStopTokens:
 
         assert result.steps_total == 2
         assert result.text == "friend "
+        assert TOK_STOP not in result.token_ids
+
+    def test_returns_first_ending_candidate_not_best_kvl(self, fixture_lookup):
+        prompt = [100]
+        prompt_len = len(prompt)
+
+        eval_fn = make_eval_fn(
+            prompt_len,
+            {
+                (): {
+                    TOK_FUNDAMENTALLY: 5.0,
+                    TOK_FRIEND: 4.0,
+                },
+                (TOK_FUNDAMENTALLY,): {
+                    TOK_STOP: 6.0,
+                },
+                (TOK_FRIEND,): {},
+            },
+        )
+
+        decoder = KvlBeamDecoder(
+            kvl_lookup=fixture_lookup,
+            l1="es",
+            text_evaluator=TextEvaluator(),
+            beam_width=2,
+            branch_factor=3,
+        )
+
+        result = decoder.decode(
+            eval_fn,
+            prompt,
+            max_tokens=10,
+            stop=[],
+            stop_token_ids=frozenset({TOK_STOP}),
+        )
+
+        assert result.text == "fundamentally "
+        assert result.steps_total == 2
         assert TOK_STOP not in result.token_ids

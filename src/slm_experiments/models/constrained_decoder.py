@@ -141,6 +141,7 @@ class ConstrainedDecoder:
         *,
         max_tokens: int,
         stop: List[str],
+        stop_token_ids: frozenset[int] | None = None,
         guided_pool_size: int,
         index: A1TokenIndex,
         mode: Literal["flat", "trie"] = "flat",
@@ -215,6 +216,10 @@ class ConstrainedDecoder:
                     if pool and not any(token_id in active_set for token_id in pool):
                         steps_no_a1_in_pool += 1
                     partial_remaining = None
+
+            if stop_token_ids and chosen in stop_token_ids:
+                steps_total += 1
+                break
 
             generated.append(chosen)
             steps_total += 1

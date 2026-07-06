@@ -120,6 +120,7 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
                 self.llm,
                 self.target_vocabulary,
                 use_trie=use_trie,
+                stop_token_ids=self._get_stop_token_ids(),
             )
         return self._a1_token_index_cache[cache_key]
 
@@ -534,6 +535,7 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
                 list(prompt_token_ids),
                 max_tokens=config.max_new_tokens,
                 stop=self._get_stop_tokens(),
+                stop_token_ids=self._get_stop_token_ids(),
                 guided_pool_size=config.guided_top_k,
                 index=index,
                 mode=config.guided_mode,

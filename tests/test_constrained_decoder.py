@@ -14,7 +14,14 @@ A1_MID = {2, 5}
 A1_START = {3, 6}
 
 
-def _make_index(*, use_trie: bool = False) -> A1TokenIndex:
+def _make_index(*, use_trie: bool = False, stop_token_ids: frozenset[int] | None = None) -> A1TokenIndex:
+    mid = set(A1_MID)
+    start = set(A1_START)
+    id_to_words = {2: ("a1",), 3: ("start",), 5: ("multi",), 6: ("start",), 7: ("multi",)}
+    for token_id in stop_token_ids or ():
+        mid.add(token_id)
+        start.add(token_id)
+        id_to_words[token_id] = ("<stop>",)
     trie = None
     if use_trie:
         from slm_experiments.models.a1_token_index import A1TokenTrie
@@ -24,9 +31,9 @@ def _make_index(*, use_trie: bool = False) -> A1TokenIndex:
             sentence_start_sequences=((6,),),
         )
     return A1TokenIndex(
-        mid_sentence_ids=frozenset(A1_MID),
-        sentence_start_ids=frozenset(A1_START),
-        id_to_words={2: ("a1",), 3: ("start",), 5: ("multi",), 6: ("start",), 7: ("multi",)},
+        mid_sentence_ids=frozenset(mid),
+        sentence_start_ids=frozenset(start),
+        id_to_words=id_to_words,
         trie=trie,
     )
 
@@ -172,6 +179,57 @@ class TestConstrainedDecoderFlat:
 
         assert result.token_ids[0] == 4
         assert result.token_ids[1] == 2
+        assert result.steps_a1_chosen == 1
+
+    def test_prefers_stop_token_in_pool_when_most_likely(self):
+        tok_stop = 4
+        llm = StubLLM(
+            [
+                _logits_from_scores({tok_stop: 5.0, 3: 4.0, 1: 3.0}),
+            ]
+        )
+        llm.token_text[tok_stop] = ""
+        result = ConstrainedDecoder().decode(
+            llm,
+            prompt_token_ids=[100],
+            max_tokens=10,
+            stop=[],
+            stop_token_ids=frozenset({tok_stop}),
+            guided_pool_size=3,
+            index=_make_index(stop_token_ids=frozenset({tok_stop})),
+            mode="flat",
+            temperature=0.0,
+            top_k=50,
+            top_p=1.0,
+        )
+
+        assert result.token_ids == []
+        assert result.steps_total == 1
+        assert result.steps_a1_chosen == 1
+
+    def test_prefers_a1_over_stop_when_a1_is_most_likely(self):
+        tok_stop = 4
+        llm = StubLLM(
+            [
+                _logits_from_scores({3: 5.0, tok_stop: 4.0, 1: 3.0}),
+            ]
+        )
+        llm.token_text[tok_stop] = ""
+        result = ConstrainedDecoder().decode(
+            llm,
+            prompt_token_ids=[100],
+            max_tokens=1,
+            stop=[],
+            stop_token_ids=frozenset({tok_stop}),
+            guided_pool_size=3,
+            index=_make_index(stop_token_ids=frozenset({tok_stop})),
+            mode="flat",
+            temperature=0.0,
+            top_k=50,
+            top_p=1.0,
+        )
+
+        assert result.token_ids == [3]
         assert result.steps_a1_chosen == 1
 
     def test_stop_sequence_halts_generation(self):
