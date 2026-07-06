@@ -11,7 +11,7 @@ This project evaluates whether small language models (SLMs) can produce pedagogi
 | Model | Parameters | Backend | Notes |
 |-------|-----------|---------|-------|
 | Qwen2 | 0.5B | llama.cpp GGUF | ChatML template |
-| Qwen3 | 0.6B | llama.cpp GGUF | ChatML; `/nothink` disables thinking tags |
+| Qwen3 | 0.6B | llama.cpp GGUF | ChatML; `enable_thinking=False` disables thinking tags |
 | TinyLlama | 1.1B | llama.cpp GGUF | Llama2-style template |
 | Phi3 | 3.8B | llama.cpp GGUF | Custom Phi-3 template; GPU required |
 
@@ -266,7 +266,7 @@ Phase 2 sweeps enable within-model hyperparameter optimization curves.
 
 | Issue | Handling |
 |-------|----------|
-| Qwen3 thinking tags | `/nothink` in prompt + formatter strip |
+| Qwen3 thinking tags | `enable_thinking=False` via Jinja chat template + formatter strip |
 | Failed gen → FK=0 | Skip metrics; `generation_successful=False` |
 | No reproducibility seed | `--seed` on all CLI runs |
 | SMOG on short text | Not included in framework |

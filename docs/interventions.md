@@ -142,8 +142,8 @@ More beams improve A1 vocabulary selection but increase generation time linearly
 
 ## Qwen3 Thinking Tags
 
-Qwen3 may emit `` blocks. Mitigation:
-1. Append `/nothink` to user prompts
+Qwen3 may emit `<think>` blocks. Mitigation:
+1. Render prompts with the GGUF Jinja chat template and `enable_thinking=False` (hard switch: empty `<think>` block in the assistant prefix)
 2. Response formatter strips thinking tags before metric evaluation
 
 ## Source Files (v2)

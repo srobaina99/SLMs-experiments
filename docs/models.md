@@ -36,7 +36,7 @@ ChatML template: `<|im_start|>system/user/assistant` blocks.
 | Quantization | Q4_0 |
 | Speed (CPU) | ~80–100 words/sec |
 | `n_gpu_layers` | 0 |
-| Special | Thinking tags — disabled via `/nothink` suffix + formatter strip |
+| Special | Thinking tags — disabled via `enable_thinking=False` in Jinja chat template + formatter strip |
 
 ChatML template (same as Qwen2).
 

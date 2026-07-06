@@ -75,9 +75,19 @@ class TestModelRegistry:
             get_model_wrapper("GPT4")
 
 
+_QWEN3_MINIMAL_CHAT_TEMPLATE = (
+    "{% for message in messages %}<|im_start|>{{ message['role'] }}\n"
+    "{{ message['content'] }}<|im_end|>\n"
+    "{% endfor %}{% if add_generation_prompt %}<|im_start|>assistant\n"
+    "{% if enable_thinking is defined and not enable_thinking %}"
+    "<think>\n\n</think>\n\n"
+    "{% endif %}{% endif %}"
+)
+
+
 class TestQwen3PromptFormatting:
     @patch("slm_experiments.models.llamacpp.Llama")
-    def test_format_prompt_includes_nothink(self, mock_llama, tmp_path):
+    def test_format_prompt_uses_hard_switch_fallback(self, mock_llama, tmp_path):
         model_path = tmp_path / "qwen3.gguf"
         model_path.write_text("fake", encoding="utf-8")
         mock_llama.return_value = _make_mock_llm()
@@ -87,11 +97,32 @@ class TestQwen3PromptFormatting:
         wrapper.model_loaded = True
 
         formatted = wrapper._format_prompt("What is a friend?", "Be helpful.")
-        assert "/nothink" in formatted
+        assert "/nothink" not in formatted
         assert "<|im_start|>system" in formatted
         assert "<|im_start|>user" in formatted
         assert "<|im_start|>assistant" in formatted
         assert "<|im_end|>" in formatted
+        assert "<think>\n\n</think>" in formatted
+
+    @patch("slm_experiments.models.llamacpp.Llama")
+    def test_format_prompt_uses_jinja_when_metadata_present(self, mock_llama, tmp_path):
+        model_path = tmp_path / "qwen3.gguf"
+        model_path.write_text("fake", encoding="utf-8")
+        mock_llm = _make_mock_llm()
+        mock_llm.metadata = {
+            "tokenizer.chat_template": _QWEN3_MINIMAL_CHAT_TEMPLATE,
+        }
+        mock_llama.return_value = mock_llm
+
+        wrapper = Qwen3LlamaCppWrapper(model_path=str(model_path), seed=42)
+        wrapper.llm = mock_llm
+        wrapper.model_loaded = True
+
+        formatted = wrapper._format_prompt("What is a friend?", "Be helpful.")
+        assert "/nothink" not in formatted
+        assert "What is a friend?" in formatted
+        assert "<think>\n\n</think>" in formatted
+        assert wrapper._jinja_formatter is not None
 
     def test_extract_response_strips_thinking_tags(self):
         wrapper = Qwen3LlamaCppWrapper.__new__(Qwen3LlamaCppWrapper)
