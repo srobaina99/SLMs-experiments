@@ -1,4 +1,8 @@
-"""Beam search generator with A1-ratio and probability selection (Step 6 generalizes)."""
+"""Beam search generator with A1-ratio and probability selection (Step 6 generalizes).
+
+Deprecated: Phase 2 beam sweep uses best-of-N stochastic sampling. At temperature=0
+all candidates are identical; use ``phase2 kvl_beam`` or ``phase2 guided`` instead.
+"""
 
 import math
 from dataclasses import dataclass
@@ -37,8 +41,7 @@ class BeamSearchGenerator:
     def generate(
         self,
         prompt: str,
-        temperature: float = 0.7,
-        top_p: float = 0.95,
+        temperature: float = 0.0,
         top_k: int = 50,
         stop: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
@@ -51,7 +54,6 @@ class BeamSearchGenerator:
                     prompt=prompt,
                     max_tokens=self.max_length,
                     temperature=temperature,
-                    top_p=top_p,
                     top_k=top_k,
                     stop=stop,
                     echo=False,

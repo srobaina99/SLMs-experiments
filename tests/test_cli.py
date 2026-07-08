@@ -202,6 +202,7 @@ class TestCliPhase2Run:
         )
 
         captured = capsys.readouterr()
+        assert "deprecated" in captured.err.lower()
         assert "20260606_120000_phase2_beam" in captured.out
 
     @patch("slm_experiments.phase2.beam.BeamSweepRunner")

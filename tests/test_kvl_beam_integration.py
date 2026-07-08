@@ -24,7 +24,6 @@ def test_generate_kvl_beam_smoke():
         config_prompting=True,
         temperature=0.0,
         top_k=50,
-        top_p=0.95,
         max_new_tokens=20,
         kvl_l1="es",
     )

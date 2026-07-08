@@ -102,7 +102,6 @@ class TestConstrainedDecoderFlat:
             mode="flat",
             temperature=0.0,
             top_k=50,
-            top_p=1.0,
         )
 
         assert result.token_ids == [3]
@@ -125,7 +124,6 @@ class TestConstrainedDecoderFlat:
             mode="flat",
             temperature=0.0,
             top_k=50,
-            top_p=1.0,
         )
 
         assert result.token_ids == [4]
@@ -150,7 +148,6 @@ class TestConstrainedDecoderFlat:
             mode="flat",
             temperature=0.0,
             top_k=50,
-            top_p=1.0,
         )
 
         assert result.token_ids == [4]
@@ -174,7 +171,6 @@ class TestConstrainedDecoderFlat:
             mode="flat",
             temperature=0.0,
             top_k=50,
-            top_p=1.0,
         )
 
         assert result.token_ids[0] == 4
@@ -200,7 +196,6 @@ class TestConstrainedDecoderFlat:
             mode="flat",
             temperature=0.0,
             top_k=50,
-            top_p=1.0,
         )
 
         assert result.token_ids == []
@@ -226,7 +221,6 @@ class TestConstrainedDecoderFlat:
             mode="flat",
             temperature=0.0,
             top_k=50,
-            top_p=1.0,
         )
 
         assert result.token_ids == [3]
@@ -249,7 +243,6 @@ class TestConstrainedDecoderFlat:
             mode="flat",
             temperature=0.0,
             top_k=50,
-            top_p=1.0,
         )
 
         assert result.steps_total == 1
@@ -269,7 +262,6 @@ class TestConstrainedDecoderFlat:
             mode="flat",
             temperature=0.0,
             top_k=50,
-            top_p=1.0,
         )
         result_a = ConstrainedDecoder().decode(llm_a, **kwargs)
         result_b = ConstrainedDecoder().decode(llm_b, **kwargs)
@@ -297,7 +289,6 @@ class TestConstrainedDecoderTrie:
             mode="trie",
             temperature=0.0,
             top_k=50,
-            top_p=1.0,
         )
 
         assert result.token_ids == [4, 5, 7]
@@ -322,7 +313,6 @@ class TestConstrainedDecoderTrie:
             mode="trie",
             temperature=0.0,
             top_k=50,
-            top_p=1.0,
         )
 
         assert result.token_ids == [4, 5, 4]

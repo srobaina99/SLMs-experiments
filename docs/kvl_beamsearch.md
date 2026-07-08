@@ -103,7 +103,7 @@ Current code uses one-shot `llm(prompt, max_tokens=...)`. KVL beam requires a **
 
 ### 6. Stochastic vs deterministic search
 
-Phase 2 beam sweep uses `temperature=0.7`. For true beam search, **temperature=0.0** is strongly recommended: beam already explores via branching; adding sampling noise complicates reproducibility and pruning.
+Phase 2 best-of-N beam sweep (`phase2 beam`) used stochastic sampling at `temperature=0.7` and is **deprecated**. All active experiments use **`temperature=0.0`**. KVL beam and guided decoding apply **`top_k=50`** as the vocabulary cap before branch/pool selection.
 
 ---
 
@@ -168,7 +168,7 @@ Each row is a design fork. Recommended defaults are marked **(Recommended)** for
 candidates = []
 for each active beam:
     logits = llm.eval(beam.context)
-    top_K = top_k_tokens(logits, branch_factor)   # after model top_k/top_p if desired
+    top_K = top_k_tokens(logits, branch_factor)   # after model top_k filter
     for token in top_K:
         candidates.append(beam.extend(token))
 

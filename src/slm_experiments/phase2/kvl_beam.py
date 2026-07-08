@@ -65,7 +65,6 @@ def create_kvl_beam_configs(
                     num_shots=0,
                     temperature=0.0,
                     top_k=50,
-                    top_p=0.95,
                     max_new_tokens=200,
                     experiment_name=f"{model_name}_kvl_beam_w{width}",
                     description=(

@@ -83,7 +83,7 @@ Default grid sweeps **pool size** (how many top logits are considered before the
 | `config_guided` | `True` | New flag |
 | `guided_top_k` | `5, 10, 20` | Swept hyperparameter |
 | `guided_mode` | `"flat"` | `"flat"` or `"trie"` (see below) |
-| `temperature` | `0.0` (recommended) | Greedy + guided override; optional `0.7` comparison arm |
+| `temperature` | `0.0` | Greedy + guided override |
 | Weighting / beam | OFF | Do not combine in first sweep |
 
 **Config naming:** `{model}_guided_k{10}` (parseable like beam's `_beam_w(\d+)`).
@@ -158,7 +158,6 @@ class ConstrainedDecoder:
         mode: Literal["flat", "trie"],
         temperature: float,
         top_k: int,
-        top_p: float,
     ) -> ConstrainedDecodeResult:
         """
         Returns token_ids, text, steps_total, steps_a1_chosen,
@@ -170,7 +169,7 @@ class ConstrainedDecoder:
 
 ```
 logits = next_token_logits(context)
-candidates = apply model top_k / top_p, then take top guided_pool_size by logit
+candidates = apply model top_k, then take top guided_pool_size by logit
 active_set = index.candidate_set_for_context(decoded_so_far)
 a1_hits = [t for t in candidates if t in active_set]   # preserve logit order
 
@@ -206,7 +205,7 @@ guided_top_k: int = 10          # pool size at each step (experiment hyperparame
 guided_mode: str = "flat"       # "flat" | "trie"
 ```
 
-Note: `guided_top_k` (pool size) is distinct from `ExperimentConfig.top_k` (model sampling cap). Apply model `top_k`/`top_p` first, then take the top `guided_top_k` from survivors, then apply the A1 filter.
+Note: `guided_top_k` (pool size) is distinct from `ExperimentConfig.top_k` (model sampling cap). Apply model `top_k` first, then take the top `guided_top_k` from survivors, then apply the A1 filter.
 
 ### `core/pipeline.py` — `run_guided()`
 
@@ -275,7 +274,7 @@ def run_guided(...) -> ExperimentResult:
 | | |
 |-|-|
 | **Symptom** | `ExperimentConfig.top_k=50` (sampling) vs `guided_top_k=10` (pool) |
-| **Solution** | Document clearly; apply model `top_k`/`top_p` first, then pool trim, then A1 filter |
+| **Solution** | Document clearly; apply model `top_k` first, then pool trim, then A1 filter |
 | **Verify** | Unit test: pool=3 only considers three candidates |
 | **Owner** | `constrained_decoder.py`, config docs |
 
@@ -293,10 +292,10 @@ def run_guided(...) -> ExperimentResult:
 
 | | |
 |-|-|
-| **Symptom** | At `temperature=0.7`, behavior is harder to reproduce |
-| **Solution** | Default sweep uses `temperature=0.0`; optional `--temperature 0.7` comparison |
-| **Verify** | Same prompt + seed → identical output at temp=0 |
-| **Owner** | `guided.py` config factory |
+| **Symptom** | Stochastic decoding makes behavior harder to reproduce |
+| **Solution** | All sweeps use `temperature=0.0` (greedy + guided override) |
+| **Verify** | Same prompt + seed → identical output |
+| **Owner** | config factories |
 
 ### 7. Stop tokens and chat templates
 
@@ -359,7 +358,6 @@ ExperimentConfig(
     guided_mode="flat",
     temperature=0.0,
     top_k=50,
-    top_p=1.0,
     experiment_name="Qwen3_guided_k10",
     description="Guided decode: top-10 pool, A1 preference, zero-shot prompting",
 )

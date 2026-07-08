@@ -188,7 +188,6 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
                 formatted_prompt,
                 max_tokens=config.max_new_tokens,
                 temperature=config.temperature,
-                top_p=config.top_p,
                 top_k=config.top_k,
                 stop=self._get_stop_tokens(),
                 echo=False,
@@ -353,7 +352,6 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
             beam_results = beam_generator.generate(
                 prompt=formatted_prompt,
                 temperature=config.temperature,
-                top_p=config.top_p,
                 top_k=config.top_k,
                 stop=self._get_stop_tokens(),
             )
@@ -541,7 +539,6 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
                 mode=config.guided_mode,
                 temperature=config.temperature,
                 top_k=config.top_k,
-                top_p=config.top_p,
             )
 
             raw_response = decode_result.text
@@ -736,7 +733,6 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
                 self.llm,
                 prompt_token_ids,
                 top_k=config.top_k,
-                top_p=config.top_p,
             )
 
             decode_result = decoder.decode(

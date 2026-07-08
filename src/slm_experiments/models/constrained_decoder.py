@@ -20,15 +20,6 @@ class ConstrainedDecodeResult:
     steps_no_a1_in_pool: int
 
 
-def _softmax(logits: np.ndarray) -> np.ndarray:
-    shifted = logits - np.max(logits)
-    exp = np.exp(shifted)
-    total = exp.sum()
-    if total <= 0:
-        return np.ones_like(logits) / len(logits)
-    return exp / total
-
-
 def _apply_top_k(logits: np.ndarray, top_k: int) -> np.ndarray:
     if top_k <= 0 or top_k >= logits.size:
         return logits.copy()
@@ -38,35 +29,17 @@ def _apply_top_k(logits: np.ndarray, top_k: int) -> np.ndarray:
     return filtered
 
 
-def _apply_top_p(logits: np.ndarray, top_p: float) -> np.ndarray:
-    if top_p >= 1.0:
-        return logits.copy()
-    filtered = logits.copy()
-    sorted_indices = np.argsort(filtered)[::-1]
-    sorted_logits = filtered[sorted_indices]
-    probs = _softmax(sorted_logits)
-    cumulative = np.cumsum(probs)
-    cutoff = int(np.searchsorted(cumulative, top_p, side="right"))
-    if cutoff < len(sorted_indices):
-        remove = set(sorted_indices[cutoff + 1 :].tolist())
-        for idx in remove:
-            filtered[idx] = -np.inf
-    return filtered
-
-
 def _pool_candidates(
     logits: np.ndarray,
     *,
     temperature: float,
     top_k: int,
-    top_p: float,
     guided_pool_size: int,
 ) -> List[int]:
     working = logits.astype(np.float64, copy=True)
     if temperature > 0:
         working = working / temperature
     working = _apply_top_k(working, top_k)
-    working = _apply_top_p(working, top_p)
     finite_mask = np.isfinite(working)
     if not finite_mask.any():
         return [int(np.argmax(logits))]
@@ -147,7 +120,6 @@ class ConstrainedDecoder:
         mode: Literal["flat", "trie"] = "flat",
         temperature: float = 0.0,
         top_k: int = 50,
-        top_p: float = 1.0,
     ) -> ConstrainedDecodeResult:
         _reset_llm(llm)
         _eval_tokens(llm, prompt_token_ids)
@@ -175,7 +147,6 @@ class ConstrainedDecoder:
                     logits,
                     temperature=temperature,
                     top_k=top_k,
-                    top_p=top_p,
                     guided_pool_size=guided_pool_size,
                 )
                 trie_hits = [token_id for token_id in pool if token_id in cont_ids]
@@ -193,7 +164,6 @@ class ConstrainedDecoder:
                     logits,
                     temperature=temperature,
                     top_k=top_k,
-                    top_p=top_p,
                     guided_pool_size=guided_pool_size,
                 )
                 active_set = index.candidate_set_for_context(generated_text)

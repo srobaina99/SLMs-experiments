@@ -1,4 +1,4 @@
-"""Phase 2 beam width sweep runner."""
+"""Phase 2 beam width sweep runner (deprecated — use kvl_beam or guided)."""
 
 from __future__ import annotations
 
@@ -74,9 +74,8 @@ def create_beam_configs(beam_widths: List[int]) -> List[ExperimentConfig]:
                     config_prompting=True,
                     weight_factor=1.0,
                     num_shots=0,
-                    temperature=0.7,
+                    temperature=0.0,
                     top_k=50,
-                    top_p=0.95,
                     max_new_tokens=200,
                     experiment_name=f"{model_name}_beam_w{width}",
                     description=(

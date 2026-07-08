@@ -100,7 +100,6 @@ def decode_incremental_greedy(
     stop: list[str],
     stop_token_ids: frozenset[int],
     top_k: int = 50,
-    top_p: float = 0.95,
 ) -> tuple[list[int], str]:
     """
     Single-path greedy loop: eval prompt once, then eval one token at a time.
@@ -112,7 +111,7 @@ def decode_incremental_greedy(
     generated: list[int] = []
 
     for _ in range(max_tokens):
-        next_token = llm.sample(temp=0.0, top_k=top_k, top_p=top_p)
+        next_token = llm.sample(temp=0.0, top_k=top_k)
         if hits_stop_token(next_token, stop_token_ids):
             break
         generated.append(next_token)
@@ -172,14 +171,12 @@ def one_shot_generate(
     max_tokens: int,
     stop: list[str],
     top_k: int = 50,
-    top_p: float = 0.95,
 ) -> str:
     output = llm(
         formatted_prompt,
         max_tokens=max_tokens,
         temperature=0.0,
         top_k=top_k,
-        top_p=top_p,
         stop=stop,
         echo=False,
     )
@@ -191,7 +188,6 @@ def run_spike(prompt: str, seed: int = 42) -> int:
         config_prompting=True,
         temperature=0.0,
         top_k=50,
-        top_p=0.95,
         max_new_tokens=MAX_TOKENS,
         system_prompt="You are a helpful English teacher for beginner students.",
     )
@@ -230,7 +226,6 @@ def run_spike(prompt: str, seed: int = 42) -> int:
         stop=stop,
         stop_token_ids=stop_token_ids,
         top_k=config.top_k,
-        top_p=config.top_p,
     )
     reset_ids, reset_text = decode_reset_prefix_greedy(
         llm,
@@ -245,7 +240,6 @@ def run_spike(prompt: str, seed: int = 42) -> int:
         max_tokens=MAX_TOKENS,
         stop=stop,
         top_k=config.top_k,
-        top_p=config.top_p,
     )
 
     print(f"\nIncremental greedy ({len(inc_ids)} tokens):")

@@ -56,7 +56,7 @@ The space prefix (`" " + word`) ensures token IDs match mid-sentence BPE tokeniz
 
 - `config_weighting=True`, `weight_factor=1.5` for weighted conditions
 - Applied at every decoding step, uniformly across all A1 tokens
-- Interacts with temperature (0.7), top-k (50), top-p (0.95)
+- Interacts with temperature (0.0), top-k (50)
 
 ### Phase 2 Weight Sweep
 
@@ -86,13 +86,19 @@ Avoid complex grammar structures and difficult words.
 
 Weighting and beam disabled during prompting sweep.
 
-## 3. Best-of-N Sampling with A1-Ratio Selection
+## 3. Best-of-N Sampling with A1-Ratio Selection (deprecated)
 
-Generates `beam_width` **independent** stochastic samples (not canonical beam decoding) and selects the one with the highest A1 vocabulary ratio. The `BeamSearchGenerator` name is historical; behavior is best-of-N reranking.
+> **Deprecated:** The Phase 2 beam sweep (`phase2 beam`) is superseded by
+> [`phase2 kvl_beam`](kvl_beamsearch.md) and [`phase2 guided`](guided-decoding.md).
+> At `temperature=0.0`, all best-of-N candidates are identical, so beam width
+> no longer provides diversity. The CLI still accepts `phase2 beam` but prints a
+> deprecation warning.
+
+Generates `beam_width` **independent** samples (not canonical beam decoding) and selects the one with the highest A1 vocabulary ratio. The `BeamSearchGenerator` name is historical; behavior is best-of-N reranking.
 
 ### Algorithm
 
-1. Run `beam_width` separate temperature-sampled generations (`echo=False` → response text only)
+1. Run `beam_width` separate greedy generations at `temperature=0.0` (`echo=False` → response text only)
 2. For each candidate response, compute A1 ratio (prompt/context excluded)
 3. Select candidate with highest ratio
 4. Record beam metadata in `full.csv`
@@ -105,7 +111,7 @@ A1_ratio = (Count of A1 words × 1.5) / Count of content words
 
 Content words identified via NLTK POS tagging (`NN`, `VB`, `JJ`, `RB`, etc.) with heuristic fallback for short texts.
 
-### Phase 2 Beam Sweep
+### Phase 2 Beam Sweep (legacy)
 
 Default widths: `4, 8, 10`
 
@@ -113,13 +119,12 @@ Default widths: `4, 8, 10`
 |---------|-------|
 | Contextual prompting | Enabled (zero-shot) |
 | Logit bias | Disabled |
-| Temperature | 0.7 |
-| Top-P | 0.95 |
+| Temperature | 0.0 |
 | Top-K | 50 |
 
 ### Trade-offs
 
-More beams improve A1 vocabulary selection but increase generation time linearly (~76s for width=4 → ~150s for width=8 on Qwen3).
+More beams improve A1 vocabulary selection but increase generation time linearly (~76s for width=4 → ~150s for width=8 on Qwen3). At temperature 0, rerunning width>1 duplicates the same greedy path — use KVL beam or guided decoding instead.
 
 ## Intervention Matrix
 

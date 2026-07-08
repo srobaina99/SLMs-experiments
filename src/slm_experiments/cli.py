@@ -144,8 +144,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p2_beam = p2_sub.add_parser(
         "beam",
-        help="Sweep beam-search widths (A1-ratio candidate selection)",
-        description="Sweep beam width while using A1-ratio selection over candidates.",
+        help="[DEPRECATED] Sweep beam-search widths — use kvl_beam or guided",
+        description=(
+            "Deprecated: best-of-N beam sweep is superseded by KVL beam and guided "
+            "decoding at temperature=0. Prefer ``phase2 kvl_beam`` or ``phase2 guided``."
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=_examples(
             "slm_experiments phase2 beam",
@@ -404,6 +407,12 @@ def main(argv: list[str] | None = None) -> None:
             return
 
         if args.sweep == "beam":
+            print(
+                "WARNING: phase2 beam is deprecated. At temperature=0 all beam "
+                "candidates are identical. Use phase2 kvl_beam or phase2 guided "
+                "instead.",
+                file=sys.stderr,
+            )
             from slm_experiments.phase2.beam import BeamSweepRunner
 
             runner = BeamSweepRunner()

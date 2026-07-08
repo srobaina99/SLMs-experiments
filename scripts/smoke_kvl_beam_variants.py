@@ -391,7 +391,6 @@ def load_smoke_context(
         config_weighting=False,
         temperature=0.0,
         top_k=50,
-        top_p=0.95,
         max_new_tokens=200,
         kvl_l1="es",
     )
@@ -435,7 +434,6 @@ def run_config(
             wrapper.llm,
             prompt_ids,
             top_k=config.top_k,
-            top_p=config.top_p,
         )
 
         decoder = VariantKvlBeamDecoder(

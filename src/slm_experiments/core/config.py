@@ -23,9 +23,8 @@ class ExperimentConfig:
 
     prompt_id: str = ""
 
-    temperature: float = 0.7
+    temperature: float = 0.0
     top_k: int = 50
-    top_p: float = 0.95
     max_new_tokens: int = 200
 
     experiment_name: str = "default_experiment"

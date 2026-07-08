@@ -49,9 +49,8 @@ def create_factorial_configs() -> List[ExperimentConfig]:
                     config_weighting=config_weighting,
                     config_prompting=config_prompting,
                     weight_factor=DEFAULT_WEIGHT_FACTOR,
-                    temperature=0.7,
+                    temperature=0.0,
                     top_k=50,
-                    top_p=0.95,
                     max_new_tokens=200,
                     experiment_name=name,
                     description=(

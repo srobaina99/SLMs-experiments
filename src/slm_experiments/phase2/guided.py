@@ -82,7 +82,6 @@ def create_guided_configs(
                     guided_mode=guided_mode,
                     temperature=0.0,
                     top_k=50,
-                    top_p=0.95,
                     max_new_tokens=200,
                     experiment_name=f"{model_name}_guided_k{pool_size}",
                     description=(

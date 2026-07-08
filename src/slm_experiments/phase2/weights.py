@@ -63,9 +63,8 @@ def create_weight_configs(weight_factors: List[float]) -> List[ExperimentConfig]
                     config_prompting=True,
                     weight_factor=weight,
                     num_shots=0,
-                    temperature=0.7,
+                    temperature=0.0,
                     top_k=50,
-                    top_p=0.95,
                     max_new_tokens=200,
                     experiment_name=f"{model_name}_weighted_prompted_{weight_str}",
                     description=(

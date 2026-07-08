@@ -368,13 +368,12 @@ def get_last_logits(llm) -> list[float]:
     return [float(raw[i]) for i in range(n_vocab)]
 
 
-def apply_top_k_top_p_mask(
+def apply_top_k_mask(
     logits: list[float],
     *,
     top_k: int,
-    top_p: float,
 ) -> list[float]:
-    """Mask logits outside top_k and nucleus top_p (temperature=0 expansion set)."""
+    """Mask logits outside top_k (temperature=0 expansion set)."""
     n_vocab = len(logits)
     if n_vocab == 0:
         return logits
@@ -394,22 +393,6 @@ def apply_top_k_top_p_mask(
     if top_k > 0:
         ranked = ranked[: min(top_k, len(ranked))]
 
-    if 0.0 < top_p < 1.0 and len(ranked) > 1:
-        selected_logits = [logits[idx] for idx in ranked]
-        max_logit = max(selected_logits)
-        probs = [math.exp(value - max_logit) for value in selected_logits]
-        total = sum(probs)
-        if total > 0:
-            probs = [prob / total for prob in probs]
-            cumulative = 0.0
-            nucleus: list[int] = []
-            for idx, prob in zip(ranked, probs):
-                nucleus.append(idx)
-                cumulative += prob
-                if cumulative >= top_p:
-                    break
-            ranked = nucleus
-
     masked = [float("-inf")] * n_vocab
     for idx in ranked:
         masked[idx] = logits[idx]
@@ -421,7 +404,6 @@ def make_llamacpp_eval_fn(
     prompt_token_ids: list[int],
     *,
     top_k: int,
-    top_p: float,
 ) -> tuple[
     Callable[[list[int]], tuple[list[float], str]],
     Callable[[list[int]], str],
@@ -440,10 +422,9 @@ def make_llamacpp_eval_fn(
     def eval_fn(token_ids: list[int]) -> tuple[list[float], str]:
         llm.reset()
         llm.eval(token_ids)
-        logits = apply_top_k_top_p_mask(
+        logits = apply_top_k_mask(
             get_last_logits(llm),
             top_k=top_k,
-            top_p=top_p,
         )
         return logits, decode_suffix(token_ids)
 

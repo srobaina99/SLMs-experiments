@@ -62,9 +62,8 @@ def create_prompting_configs(shot_counts: List[int]) -> List[ExperimentConfig]:
                     config_prompting=True,
                     weight_factor=1.0,
                     num_shots=num_shots,
-                    temperature=0.7,
+                    temperature=0.0,
                     top_k=50,
-                    top_p=0.95,
                     max_new_tokens=200,
                     experiment_name=f"{model_name}_prompting_{num_shots}shot",
                     description=(

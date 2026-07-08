@@ -16,7 +16,7 @@ class TestExperimentConfig:
         assert config.config_prompting is False
         assert config.weight_factor == 1.0
         assert config.num_shots == 0
-        assert config.temperature == 0.7
+        assert config.temperature == 0.0
 
     def test_to_dict(self):
         config = ExperimentConfig(
@@ -47,9 +47,8 @@ class TestExperimentConfig:
             "prompt_id",
             "temperature",
             "top_k",
-            "top_p",
             "max_new_tokens",
             "experiment_name",
             "description",
         }
-        assert expected.issubset(field_names)
+        assert "top_p" not in field_names
