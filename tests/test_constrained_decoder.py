@@ -317,3 +317,68 @@ class TestConstrainedDecoderTrie:
 
         assert result.token_ids == [4, 5, 4]
         assert result.steps_fallback_argmax >= 1
+
+
+class FakeLlamaCpp:
+    """Mimics llama-cpp-python with logits_all=False: eval() does not fill _scores."""
+
+    def __init__(
+        self,
+        logits_sequence: Sequence[np.ndarray],
+        *,
+        token_text: Optional[dict[int, str]] = None,
+    ):
+        self.logits_sequence = list(logits_sequence)
+        self._n_vocab = len(logits_sequence[0])
+        self._scores = np.zeros((128, self._n_vocab), dtype=np.float32)
+        self._ctx = self
+        self.token_text = token_text or {
+            0: "X",
+            1: "Y",
+            2: " a1",
+            3: "Start",
+            4: "Z",
+            5: "mul",
+            6: "Beg",
+            7: "ti",
+        }
+        self.n_tokens = 0
+        self._step = 0
+
+    def reset(self) -> None:
+        self.n_tokens = 0
+        self._step = 0
+
+    def eval(self, tokens: Sequence[int]) -> None:
+        self.n_tokens += len(tokens)
+        if len(tokens) == 1:
+            self._step += 1
+
+    def get_logits(self) -> np.ndarray:
+        step = min(self._step, len(self.logits_sequence) - 1)
+        return self.logits_sequence[step]
+
+    def detokenize(self, token_ids: Sequence[int], prev_tokens=None) -> bytes:
+        return "".join(self.token_text.get(t, "?") for t in token_ids).encode("utf-8")
+
+
+class TestConstrainedDecoderLlamaCppPath:
+    def test_reads_logits_from_ctx_not_stale_scores(self):
+        """Regression: default llama.cpp leaves _scores zeroed; logits come from _ctx."""
+        llm = FakeLlamaCpp([_logits_from_scores({4: 5.0, 1: 4.0, 3: 3.0})])
+        assert llm._scores[0, 3] == 0.0
+
+        result = ConstrainedDecoder().decode(
+            llm,
+            prompt_token_ids=[100],
+            max_tokens=1,
+            stop=[],
+            guided_pool_size=3,
+            index=_make_index(),
+            mode="flat",
+            temperature=0.0,
+            top_k=50,
+        )
+
+        assert result.token_ids == [3]
+        assert result.steps_a1_chosen == 1

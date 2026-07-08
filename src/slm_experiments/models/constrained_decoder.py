@@ -62,6 +62,12 @@ def _get_next_logits(llm, step_index: int) -> np.ndarray:
     if hasattr(llm, "logits_for_step"):
         return np.asarray(llm.logits_for_step(step_index), dtype=np.float32)
 
+    # llama-cpp-python with logits_all=False (default) does not populate _scores
+    # on eval(); fresh logits live on the context (same path as kvl_beam_decoder).
+    if hasattr(llm, "_ctx") and llm._ctx is not None and hasattr(llm, "_n_vocab"):
+        logits = llm._ctx.get_logits()
+        return np.fromiter(logits, dtype=np.float32, count=llm._n_vocab)
+
     if hasattr(llm, "get_logits"):
         raw = llm.get_logits()
         return np.asarray(raw, dtype=np.float32)
@@ -69,11 +75,7 @@ def _get_next_logits(llm, step_index: int) -> np.ndarray:
     if hasattr(llm, "_scores") and hasattr(llm, "n_tokens") and llm.n_tokens > 0:
         return np.asarray(llm._scores[llm.n_tokens - 1, :], dtype=np.float32)
 
-    if hasattr(llm, "_ctx") and llm._ctx is not None and hasattr(llm, "_n_vocab"):
-        logits = llm._ctx.get_logits()
-        return np.fromiter(logits, dtype=np.float32, count=llm._n_vocab)
-
-    raise AttributeError("llm must expose logits via logits_for_step, get_logits, _scores, or _ctx")
+    raise AttributeError("llm must expose logits via logits_for_step, _ctx, get_logits, or _scores")
 
 
 def _eval_tokens(llm, tokens: Sequence[int]) -> None:
