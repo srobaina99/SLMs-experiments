@@ -310,6 +310,39 @@ class TestRunStore:
         assert summary["by_weight_factor"]["1.5"]["count"] == 2
         assert summary["by_weight_factor"]["1.5"]["flesch_kincaid_grade"]["mean"] == 2.75
         assert list(summary["by_config"].keys()) == ["both"]
+        assert "Qwen3" in summary["by_model"]
+        assert summary["by_model"]["Qwen3"]["by_weight_factor"]["1.5"]["count"] == 2
+
+    def test_summary_by_model_stratifies_phase1_configs(self):
+        pipeline = ExperimentPipeline()
+
+        def _result(model: str, weighting: bool, prompting: bool, fk: float) -> ExperimentResult:
+            config = ExperimentConfig(
+                model_name=model,
+                config_weighting=weighting,
+                config_prompting=prompting,
+                weight_factor=1.5 if weighting else 1.0,
+                prompt_id="p01",
+            )
+            result = pipeline.run("What is a friend?", config, MockSuccessModel())
+            result.flesch_kincaid_grade = fk
+            return result
+
+        results = [
+            _result("Qwen3", False, False, 5.0),
+            _result("Qwen3", True, True, 3.0),
+            _result("TinyLlama", False, False, 6.0),
+            _result("TinyLlama", True, True, 4.0),
+        ]
+        summary = compute_summary_stats(results, experiment="factorial")
+
+        assert set(summary["by_model"].keys()) == {"Qwen3", "TinyLlama"}
+        assert summary["by_model"]["Qwen3"]["by_config"]["control"]["count"] == 1
+        assert summary["by_model"]["Qwen3"]["by_config"]["both"]["flesch_kincaid_grade"]["mean"] == 3.0
+        assert summary["by_model"]["TinyLlama"]["by_config"]["both"]["flesch_kincaid_grade"]["mean"] == 4.0
+        # Pooled by_config still present as overview
+        assert summary["by_config"]["control"]["count"] == 2
+        assert summary["by_config"]["both"]["count"] == 2
 
     def test_summary_includes_prompting_shot_buckets(self, tmp_path: Path):
         pipeline = ExperimentPipeline()

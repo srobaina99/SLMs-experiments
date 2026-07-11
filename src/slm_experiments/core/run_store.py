@@ -87,6 +87,40 @@ def _aggregate_metric_stats(df: pd.DataFrame) -> Dict[str, Any]:
     return stats
 
 
+def _build_sweep_grouped(
+    df: pd.DataFrame,
+    group_column: str,
+) -> Optional[Dict[str, Any]]:
+    """Aggregate metric stats keyed by sweep hyperparameter values."""
+    if group_column not in df.columns:
+        return None
+
+    values = df[group_column].dropna().unique()
+    if len(values) <= 1:
+        return None
+
+    grouped: Dict[str, Any] = {}
+    for value in sorted(values, key=lambda item: _sweep_sort_key(group_column, item)):
+        key = _format_sweep_key(group_column, value)
+        group_df = df[df[group_column] == value]
+        grouped[key] = _aggregate_metric_stats(group_df)
+    return grouped
+
+
+def _build_by_config(df: pd.DataFrame) -> Dict[str, Any]:
+    """Aggregate metric stats keyed by intervention config label."""
+    if "intervention_config" not in df.columns:
+        return {}
+
+    by_config: Dict[str, Any] = {}
+    for config in ("control", "weighting_only", "prompting_only", "both"):
+        config_df = df[df["intervention_config"] == config]
+        if config_df.empty:
+            continue
+        by_config[config] = _aggregate_metric_stats(config_df)
+    return by_config
+
+
 def _add_sweep_summary(
     summary: Dict[str, Any],
     df: pd.DataFrame,
@@ -100,18 +134,9 @@ def _add_sweep_summary(
         return
 
     section_key, group_column = sweep_spec
-    if group_column not in df.columns:
+    grouped = _build_sweep_grouped(df, group_column)
+    if not grouped:
         return
-
-    values = df[group_column].dropna().unique()
-    if len(values) <= 1:
-        return
-
-    grouped: Dict[str, Any] = {}
-    for value in sorted(values, key=lambda item: _sweep_sort_key(group_column, item)):
-        key = _format_sweep_key(group_column, value)
-        group_df = df[df[group_column] == value]
-        grouped[key] = _aggregate_metric_stats(group_df)
 
     summary[section_key] = grouped
     summary["metadata"]["sweep_dimension"] = group_column
@@ -119,6 +144,38 @@ def _add_sweep_summary(
         grouped.keys(),
         key=lambda item: _sweep_sort_key(group_column, item),
     )
+
+
+def _add_by_model_summary(
+    summary: Dict[str, Any],
+    df: pd.DataFrame,
+    experiment: Optional[str],
+) -> None:
+    """Nest per-model aggregates (overall + by_config / sweep) under ``by_model``."""
+    if "model" not in df.columns or df.empty:
+        return
+
+    by_model: Dict[str, Any] = {}
+    sweep_spec = SWEEP_SUMMARY_SECTIONS.get(experiment) if experiment else None
+
+    for model_name in sorted(df["model"].dropna().unique().tolist()):
+        model_df = df[df["model"] == model_name]
+        model_stats = _aggregate_metric_stats(model_df)
+
+        by_config = _build_by_config(model_df)
+        if by_config:
+            model_stats["by_config"] = by_config
+
+        if sweep_spec is not None:
+            section_key, group_column = sweep_spec
+            grouped = _build_sweep_grouped(model_df, group_column)
+            if grouped:
+                model_stats[section_key] = grouped
+
+        by_model[str(model_name)] = model_stats
+
+    if by_model:
+        summary["by_model"] = by_model
 
 
 def make_run_id(
@@ -170,15 +227,10 @@ def compute_summary_stats(
     if "config_weighting" in df.columns and "config_prompting" in df.columns:
         df = df.copy()
         df["intervention_config"] = df.apply(_config_label, axis=1)
-
-        for config in ("control", "weighting_only", "prompting_only", "both"):
-            config_df = df[df["intervention_config"] == config]
-            if config_df.empty:
-                continue
-
-            summary["by_config"][config] = _aggregate_metric_stats(config_df)
+        summary["by_config"] = _build_by_config(df)
 
     _add_sweep_summary(summary, df, experiment)
+    _add_by_model_summary(summary, df, experiment)
 
     summary["metadata"] = {
         **summary.get("metadata", {}),
