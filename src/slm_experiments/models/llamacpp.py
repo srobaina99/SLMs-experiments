@@ -143,13 +143,18 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
 
         llama.cpp logit_bias is additive in log-space; a weight_factor of 1.5
         corresponds to math.log(1.5) bias per matching token.
+
+        Includes both mid-sentence and sentence-start tokenizations so A1 words
+        are boosted whether they appear after whitespace or at a word boundary
+        (aligned with guided decoding's dual context sets).
         """
         if not self.llm or not vocab or weight_factor <= 0:
             return {}
 
         bias_value = math.log(weight_factor)
         index = A1TokenIndex.build(self.llm, vocab, use_trie=False)
-        return {token_id: bias_value for token_id in index.mid_sentence_ids}
+        token_ids = index.mid_sentence_ids | index.sentence_start_ids
+        return {token_id: bias_value for token_id in token_ids}
 
     def _prepare_beam_scoring_text(self, raw_output: str) -> str:
         """Extract and clean beam candidate text before A1-ratio scoring."""
@@ -618,7 +623,12 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
         beam_width: int = 4,
         branch_factor: int = 10,
     ) -> Dict[str, Any]:
-        """Generate via KVL-scored token-level beam search."""
+        """Generate via KVL-scored token-level beam search.
+
+        Stopping is first-finish (see ``KvlBeamDecoder``): the first non-empty
+        finished candidate wins so outputs are not forced to ``max_new_tokens``
+        by mean-KVL ranking, which does not reward ending a sentence.
+        """
         start_time = time.time()
         beam_timeout = self._kvl_beam_timeout_seconds(
             config.max_new_tokens, beam_width, branch_factor

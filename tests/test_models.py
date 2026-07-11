@@ -173,6 +173,17 @@ class TestLlamaCppGenerate:
         assert "What is a friend?" in prompt_arg
 
     def test_config_weighting_applies_logit_bias(self, stub_wrapper):
+        """generate() passes logit_bias covering mid + sentence-start A1 IDs."""
+        stub_wrapper.llm = _make_mock_llm(
+            token_map={
+                " hello": [10],
+                "hello": [11],
+                " world": [20],
+                "world": [21],
+                " cat": [30],
+                "cat": [31],
+            }
+        )
         config = ExperimentConfig(
             model_name="Stub", config_weighting=True, weight_factor=1.5
         )
@@ -181,7 +192,29 @@ class TestLlamaCppGenerate:
         logit_bias = call_kwargs["logit_bias"]
         assert logit_bias is not None
         expected_bias = math.log(1.5)
+        # Mid (10, 20, 30) and sentence-start (11, 21, 31) from stub vocab
+        assert set(logit_bias.keys()) == {10, 11, 20, 21, 30, 31}
         assert all(v == pytest.approx(expected_bias) for v in logit_bias.values())
+
+    def test_create_logit_bias_includes_sentence_start_ids(self, stub_wrapper):
+        """Weighting biases both mid-sentence and sentence-start A1 token IDs."""
+        stub_wrapper.llm = _make_mock_llm(
+            token_map={
+                " hello": [10],
+                "hello": [11],
+                " world": [20],
+                "world": [21],
+                " cat": [30],
+                "cat": [31],
+            }
+        )
+        bias = stub_wrapper._create_logit_bias(
+            ["hello", "world", "cat"], weight_factor=1.5
+        )
+        expected_bias = math.log(1.5)
+        # Mid-sentence IDs (10, 20, 30) and sentence-start IDs (11, 21, 31)
+        assert set(bias.keys()) == {10, 11, 20, 21, 30, 31}
+        assert all(v == pytest.approx(expected_bias) for v in bias.values())
 
     def test_seed_passed_to_llama_constructor(self, tmp_path):
         vocab = tmp_path / "vocab.txt"

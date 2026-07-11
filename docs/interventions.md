@@ -1,8 +1,15 @@
 # Interventions
 
-How each inference-time intervention works in code. All three operate at generation time without model fine-tuning.
+How each inference-time intervention works in code. All operate at generation time without model fine-tuning.
 
-A fourth intervention — **top-k A1-guided decoding** — is designed but not yet implemented. See [guided-decoding.md](guided-decoding.md).
+Live interventions:
+
+1. Probability weighting (logit bias)
+2. Contextual prompting
+3. Top-k A1-guided decoding — [guided-decoding.md](guided-decoding.md) (`phase2 guided`)
+4. KVL-scored beam search — [kvl_beamsearch.md](kvl_beamsearch.md) (`phase2 kvl_beam`)
+
+Best-of-N beam (`phase2 beam`) is **deprecated** at `temperature=0.0` (see §3).
 
 ## 1. Probability Weighting (Logit Bias)
 
@@ -24,18 +31,23 @@ On model wrapper init, `data/vocabularies/filtered_starters_vocab.txt` is loaded
 
 ### Building logit_bias
 
+Weighting shares tokenization with guided decoding via `A1TokenIndex`. Each A1 word is tokenized in **both** contexts so sentence-initial and mid-sentence forms are boosted:
+
 ```python
 def _create_logit_bias(vocab, weight_factor):
     bias_value = math.log(weight_factor)
-    logit_bias = {}
-    for word in vocab:
-        tokens = llm.tokenize((" " + word).encode("utf-8"), add_bos=False)
-        for token_id in tokens:
-            logit_bias[token_id] = bias_value
-    return logit_bias
+    index = A1TokenIndex.build(llm, vocab, use_trie=False)
+    # mid: tokenize(" " + word); start: tokenize(word)
+    token_ids = index.mid_sentence_ids | index.sentence_start_ids
+    return {token_id: bias_value for token_id in token_ids}
 ```
 
-The space prefix (`" " + word`) ensures token IDs match mid-sentence BPE tokenization.
+| Context | Tokenization | Why |
+|---------|--------------|-----|
+| Mid-sentence | `" " + word` | Matches BPE after whitespace inside a sentence |
+| Sentence-start | `word` (no leading space) | Matches tokens at the start of a word / after a boundary |
+
+Guided decoding picks one set per step from context; weighting applies a static bias to the **union** of both sets at every step (llama.cpp `logit_bias` is not context-aware).
 
 ### Mathematical Effect
 
@@ -88,11 +100,11 @@ Weighting and beam disabled during prompting sweep.
 
 ## 3. Best-of-N Sampling with A1-Ratio Selection (deprecated)
 
-> **Deprecated:** The Phase 2 beam sweep (`phase2 beam`) is superseded by
+> **Deprecated / excluded from thesis claims:** The Phase 2 beam sweep (`phase2 beam`) is superseded by
 > [`phase2 kvl_beam`](kvl_beamsearch.md) and [`phase2 guided`](guided-decoding.md).
 > At `temperature=0.0`, all best-of-N candidates are identical, so beam width
-> no longer provides diversity. The CLI still accepts `phase2 beam` but prints a
-> deprecation warning.
+> no longer provides diversity. The CLI **hard-fails** on `phase2 beam`
+> (`sys.exit(1)`). Keep this section only as historical reference.
 
 Generates `beam_width` **independent** samples (not canonical beam decoding) and selects the one with the highest A1 vocabulary ratio. The `BeamSearchGenerator` name is historical; behavior is best-of-N reranking.
 
@@ -139,11 +151,13 @@ More beams improve A1 vocabulary selection but increase generation time linearly
 
 ### Phase 2 Sweeps
 
-| Sweep | Weighting | Prompting | Beam |
-|-------|-----------|-----------|------|
-| weights | ✓ (varied) | ✓ (zero-shot) | ✗ |
-| beam | ✗ | ✓ (zero-shot) | ✓ (varied) |
-| prompting | ✗ | ✓ (0/1/3 shots) | ✗ |
+| Sweep | Weighting | Prompting | Decoder |
+|-------|-----------|-----------|---------|
+| weights | ✓ (varied) | ✓ (zero-shot) | greedy |
+| prompting | ✗ | ✓ (0/1/3 shots) | greedy |
+| guided | ✗ | ✓ (zero-shot) | A1-constrained greedy |
+| kvl_beam | ✗ | ✓ (zero-shot) | KVL beam |
+| beam (deprecated) | ✗ | ✓ (zero-shot) | best-of-N — **excluded** |
 
 ## Qwen3 Thinking Tags
 
