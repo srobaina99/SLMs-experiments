@@ -264,6 +264,7 @@ class ExperimentPipeline:
                 cleaned_response=cleaned,
                 generation_successful=True,
                 meets_a1_criteria=meets_a1,
+                kvl_metrics=self._compute_kvl_metrics(cleaned, config.kvl_l1),
                 **guided_kwargs,
             )
 
@@ -278,6 +279,7 @@ class ExperimentPipeline:
             cleaned_response=cleaned,
             generation_successful=False,
             meets_a1_criteria=False,
+            kvl_metrics=empty_kvl_metrics(config.kvl_l1),
             **guided_kwargs,
         )
 

@@ -27,3 +27,13 @@ def qwen3_wrapper():
     yield wrapper
     if hasattr(wrapper, "cleanup"):
         wrapper.cleanup()
+
+
+@pytest.fixture
+def tinyllama_wrapper():
+    if not gguf_available():
+        pytest.skip("GGUF not present")
+    wrapper = get_model_wrapper("TinyLlama", seed=42)
+    yield wrapper
+    if hasattr(wrapper, "cleanup"):
+        wrapper.cleanup()

@@ -1,4 +1,16 @@
-"""Phase 2 KVL beam width sweep runner."""
+"""Phase 2 KVL beam width sweep runner.
+
+Uses ``KvlBeamDecoder`` first-finish stopping: the first non-empty finished
+candidate is returned so answers can complete naturally. Mean KVL alone does
+not reward EOS; without first-finish, “best KVL” tends to pad to
+``max_new_tokens``. Width sweeps therefore measure exploration before first
+stop, not final max-KVL selection among finished hyps. See
+``docs/kvl_beamsearch.md``.
+
+Carrier: prompting ON (zero-shot), weighting OFF. Width ``1`` is an in-run
+greedy baseline (``config_kvl_beam=False`` → plain ``pipeline.run()``), not a
+one-wide KVL beam.
+"""
 
 from __future__ import annotations
 
@@ -22,7 +34,7 @@ from slm_experiments.phase1.configs import DEFAULT_SYSTEM_PROMPT
 from slm_experiments.phase1.runner import parse_models, parse_prompts
 from slm_experiments.phase2.beam import parse_widths
 
-DEFAULT_KVL_BEAM_WIDTH_GRID = [4, 8]
+DEFAULT_KVL_BEAM_WIDTH_GRID = [1, 4, 6, 8]
 _KVL_BEAM_WIDTH_PATTERN = re.compile(r"_kvl_beam_w(\d+)$")
 
 
@@ -44,12 +56,24 @@ def create_kvl_beam_configs(
     """
     Create KVL beam sweep configs: prompting ON (zero-shot), weighting OFF.
 
+    Width 1 is an in-run greedy baseline (``config_kvl_beam=False``).
     Returns 4 models × len(beam_widths) ExperimentConfig objects.
     """
     configs: List[ExperimentConfig] = []
 
     for model_name, model_info in MODEL_CONFIGS.items():
         for width in beam_widths:
+            is_baseline = width == 1
+            if is_baseline:
+                description = (
+                    f"KVL beam sweep baseline: {model_name} with contextual "
+                    f"prompting, unconstrained greedy (KVL beam OFF, l1={kvl_l1})"
+                )
+            else:
+                description = (
+                    f"KVL beam sweep: {model_name} with contextual prompting "
+                    f"(width={width}, branch_factor={branch_factor}, l1={kvl_l1})"
+                )
             configs.append(
                 ExperimentConfig(
                     model_name=model_info["model_name"],
@@ -57,7 +81,7 @@ def create_kvl_beam_configs(
                     system_prompt=DEFAULT_SYSTEM_PROMPT,
                     config_weighting=False,
                     config_prompting=True,
-                    config_kvl_beam=True,
+                    config_kvl_beam=not is_baseline,
                     kvl_beam_width=width,
                     kvl_branch_factor=branch_factor,
                     kvl_l1=kvl_l1,
@@ -67,14 +91,26 @@ def create_kvl_beam_configs(
                     top_k=50,
                     max_new_tokens=200,
                     experiment_name=f"{model_name}_kvl_beam_w{width}",
-                    description=(
-                        f"KVL beam sweep: {model_name} with contextual prompting "
-                        f"(width={width}, branch_factor={branch_factor}, l1={kvl_l1})"
-                    ),
+                    description=description,
                 )
             )
 
     return configs
+
+
+def _stamp_kvl_baseline_metadata(
+    result: ExperimentResult,
+    branch_factor: int,
+) -> ExperimentResult:
+    """Ensure baseline rows bucket under by_kvl_beam_width=1."""
+    result.kvl_beam_width = 1
+    result.kvl_branch_factor = branch_factor
+    result.kvl_beam_steps_total = 0
+    result.kvl_beam_words_scored = 0
+    result.kvl_beam_running_mean = None
+    result.kvl_beam_logprob_tiebreak = 0.0
+    result.kvl_beam_candidates_pruned = 0
+    return result
 
 
 class KvlBeamSweepRunner:
@@ -91,7 +127,7 @@ class KvlBeamSweepRunner:
 
     def run(
         self,
-        widths: str = "4,8",
+        widths: str = "1,4,6,8",
         branch_factor: int = 10,
         kvl_l1: str = "es",
         prompts: Union[str, int] = "3",
@@ -144,14 +180,25 @@ class KvlBeamSweepRunner:
                         beam_width = kvl_beam_width_from_config(config)
                         pbar.set_postfix(width=beam_width, l1=kvl_l1)
 
-                        result = self.pipeline.run_kvl_beam(
-                            prompt=prompt,
-                            config=config,
-                            model=wrapper,
-                            beam_width=beam_width,
-                            branch_factor=config.kvl_branch_factor,
-                            experiment_name=config.experiment_name,
-                        )
+                        if not config.config_kvl_beam:
+                            result = self.pipeline.run(
+                                prompt=prompt,
+                                config=config,
+                                model=wrapper,
+                                experiment_name=config.experiment_name,
+                            )
+                            result = _stamp_kvl_baseline_metadata(
+                                result, branch_factor=config.kvl_branch_factor
+                            )
+                        else:
+                            result = self.pipeline.run_kvl_beam(
+                                prompt=prompt,
+                                config=config,
+                                model=wrapper,
+                                beam_width=beam_width,
+                                branch_factor=config.kvl_branch_factor,
+                                experiment_name=config.experiment_name,
+                            )
                         results.append(result)
                         pbar.update(1)
 

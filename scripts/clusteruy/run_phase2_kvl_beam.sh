@@ -14,7 +14,8 @@
 #SBATCH --mail-user=srobaina99@gmail.com
 
 # ============================================================
-# Phase 2 KVL beam width sweep (4 models × 2 widths × 25 prompts).
+# Phase 2 KVL beam width sweep (4 models × 4 widths × 25 prompts;
+# width 1 = greedy in-run baseline; 4/6/8 = KVL beam).
 # Expect high compute cost: O(steps × width × branch_factor) per obs.
 # Submit: sbatch scripts/clusteruy/run_phase2_kvl_beam.sh
 # See docs/clusteruy.md
@@ -34,6 +35,6 @@ singularity exec --nv \
   --bind "$PROJECT_DIR":/workspace \
   "$SIF_IMAGE" \
   bash -c 'export PYTHONPATH=/workspace/src && cd /workspace && \
-    python -m slm_experiments phase2 kvl_beam --prompts all --widths 4,8 --no-plot'
+    python -m slm_experiments phase2 kvl_beam --prompts all --widths 1,4,6,8 --no-plot'
 
 echo "Done at $(date)"

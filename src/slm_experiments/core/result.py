@@ -186,6 +186,7 @@ class ExperimentResult:
         cleaned_response: str = "",
         generation_successful: bool = True,
         meets_a1_criteria: bool = False,
+        kvl_metrics: Optional[Dict[str, Any]] = None,
         guided_top_k: int = 10,
         guided_mode: str = "flat",
         guided_steps_a1_chosen: int = 0,
@@ -203,6 +204,7 @@ class ExperimentResult:
             cleaned_response=cleaned_response,
             generation_successful=generation_successful,
             meets_a1_criteria=meets_a1_criteria,
+            kvl_metrics=kvl_metrics,
         )
         result.guided_top_k = guided_top_k
         result.guided_mode = guided_mode

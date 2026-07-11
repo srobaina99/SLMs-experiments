@@ -1,4 +1,8 @@
-"""Phase 2 guided decoding top-K pool sweep runner."""
+"""Phase 2 guided decoding top-K pool sweep runner.
+
+Carrier: prompting ON (zero-shot), weighting OFF. Pool ``0`` is an in-run
+unconstrained baseline (``config_guided=False`` → plain greedy).
+"""
 
 from __future__ import annotations
 
@@ -21,12 +25,12 @@ from slm_experiments.models.base import REPO_ROOT
 from slm_experiments.phase1.configs import DEFAULT_SYSTEM_PROMPT
 from slm_experiments.phase1.runner import parse_models, parse_prompts
 
-DEFAULT_TOP_K_POOL_GRID = [5, 10, 20]
+DEFAULT_TOP_K_POOL_GRID = [0, 5, 10, 20]
 _GUIDED_TOP_K_PATTERN = re.compile(r"_guided_k(\d+)$")
 
 
 def parse_top_k_pools(top_k_pools_arg: str) -> List[int]:
-    """Parse comma-separated guided top-K pool sizes."""
+    """Parse comma-separated guided top-K pool sizes (0 = unconstrained baseline)."""
     if not top_k_pools_arg.strip():
         raise ValueError("top-k-pools argument must not be empty")
 
@@ -36,8 +40,8 @@ def parse_top_k_pools(top_k_pools_arg: str) -> List[int]:
         if not part:
             continue
         pool_size = int(part)
-        if pool_size <= 0:
-            raise ValueError(f"guided top-k pool size must be > 0, got {pool_size}")
+        if pool_size < 0:
+            raise ValueError(f"guided top-k pool size must be >= 0, got {pool_size}")
         pools.append(pool_size)
 
     if not pools:
@@ -62,12 +66,24 @@ def create_guided_configs(
     """
     Create guided decoding sweep configs: prompting ON (zero-shot), weighting OFF.
 
+    Pool size 0 is an in-run unconstrained baseline (``config_guided=False``).
     Returns 4 models × len(top_k_pools) ExperimentConfig objects.
     """
     configs: List[ExperimentConfig] = []
 
     for model_name, model_info in MODEL_CONFIGS.items():
         for pool_size in top_k_pools:
+            is_baseline = pool_size == 0
+            if is_baseline:
+                description = (
+                    f"Guided decode sweep baseline: {model_name} with contextual "
+                    f"prompting, unconstrained greedy (guided OFF)"
+                )
+            else:
+                description = (
+                    f"Guided decode sweep: {model_name} with contextual prompting "
+                    f"(top_k_pool={pool_size}, mode={guided_mode})"
+                )
             configs.append(
                 ExperimentConfig(
                     model_name=model_info["model_name"],
@@ -75,7 +91,7 @@ def create_guided_configs(
                     system_prompt=DEFAULT_SYSTEM_PROMPT,
                     config_weighting=False,
                     config_prompting=True,
-                    config_guided=True,
+                    config_guided=not is_baseline,
                     weight_factor=1.0,
                     num_shots=0,
                     guided_top_k=pool_size,
@@ -84,14 +100,24 @@ def create_guided_configs(
                     top_k=50,
                     max_new_tokens=200,
                     experiment_name=f"{model_name}_guided_k{pool_size}",
-                    description=(
-                        f"Guided decode sweep: {model_name} with contextual prompting "
-                        f"(top_k_pool={pool_size}, mode={guided_mode})"
-                    ),
+                    description=description,
                 )
             )
 
     return configs
+
+
+def _stamp_guided_baseline_metadata(
+    result: ExperimentResult,
+    guided_mode: str,
+) -> ExperimentResult:
+    """Ensure baseline rows bucket under by_guided_top_k=0."""
+    result.guided_top_k = 0
+    result.guided_mode = guided_mode
+    result.guided_steps_a1_chosen = 0
+    result.guided_steps_total = 0
+    result.guided_intervention_rate = 0.0
+    return result
 
 
 class GuidedSweepRunner:
@@ -108,7 +134,7 @@ class GuidedSweepRunner:
 
     def run(
         self,
-        top_k_pools: str = "5,10,20",
+        top_k_pools: str = "0,5,10,20",
         prompts: Union[str, int] = "3",
         models: str = "all",
         seed: int = 42,
@@ -158,12 +184,21 @@ class GuidedSweepRunner:
                         guided_k = guided_top_k_from_config(config)
                         pbar.set_postfix(top_k=guided_k, mode=mode)
 
-                        result = self.pipeline.run_guided(
-                            prompt=prompt,
-                            config=config,
-                            model=wrapper,
-                            experiment_name=config.experiment_name,
-                        )
+                        if not config.config_guided:
+                            result = self.pipeline.run(
+                                prompt=prompt,
+                                config=config,
+                                model=wrapper,
+                                experiment_name=config.experiment_name,
+                            )
+                            result = _stamp_guided_baseline_metadata(result, mode)
+                        else:
+                            result = self.pipeline.run_guided(
+                                prompt=prompt,
+                                config=config,
+                                model=wrapper,
+                                experiment_name=config.experiment_name,
+                            )
                         results.append(result)
                         pbar.update(1)
 
