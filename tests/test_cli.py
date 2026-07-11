@@ -182,37 +182,21 @@ class TestCliPhase2Run:
 
         assert mock_runner.run.call_args.kwargs["no_plot"] is True
 
-    @patch("slm_experiments.phase2.beam.BeamSweepRunner")
-    def test_phase2_run_beam_dispatches(self, mock_runner_cls, capsys):
-        mock_runner = mock_runner_cls.return_value
-        mock_runner.run.return_value = (
-            "20260606_120000_phase2_beam",
-            Path("/tmp/run"),
-        )
+    def test_phase2_run_beam_hard_fails(self, capsys):
+        with pytest.raises(SystemExit) as exc_info:
+            main(["phase2", "beam", "--widths", "4,8,10", "--seed", "7"])
 
-        main(["phase2", "beam", "--widths", "4,8,10", "--seed", "7"])
-
-        mock_runner.run.assert_called_once_with(
-            widths="4,8,10",
-            prompts="3",
-            models="all",
-            seed=7,
-            no_plot=False,
-            cli_args=["phase2", "beam", "--widths", "4,8,10", "--seed", "7"],
-        )
-
+        assert exc_info.value.code == 1
         captured = capsys.readouterr()
         assert "deprecated" in captured.err.lower()
-        assert "20260606_120000_phase2_beam" in captured.out
+        assert "kvl_beam" in captured.err.lower() or "guided" in captured.err.lower()
 
-    @patch("slm_experiments.phase2.beam.BeamSweepRunner")
-    def test_phase2_run_beam_no_plot(self, mock_runner_cls):
-        mock_runner = mock_runner_cls.return_value
-        mock_runner.run.return_value = ("run_id", Path("/tmp/run"))
+    def test_phase2_run_beam_no_plot_also_hard_fails(self, capsys):
+        with pytest.raises(SystemExit) as exc_info:
+            main(["phase2", "beam", "--no-plot"])
 
-        main(["phase2", "beam", "--no-plot"])
-
-        assert mock_runner.run.call_args.kwargs["no_plot"] is True
+        assert exc_info.value.code == 1
+        assert "deprecated" in capsys.readouterr().err.lower()
 
     @patch("slm_experiments.phase2.guided.GuidedSweepRunner")
     def test_phase2_run_guided_dispatches(self, mock_runner_cls, capsys):

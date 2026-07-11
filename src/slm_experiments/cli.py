@@ -16,10 +16,10 @@ Quick start
 
 Phase 2 sweeps
   slm_experiments phase2 weights
-  slm_experiments phase2 beam --widths 4,8,10
-  slm_experiments phase2 guided --top-k-pools 5,10,20
-  slm_experiments phase2 kvl_beam --widths 4,8
   slm_experiments phase2 prompting --shots 0,1,3
+  slm_experiments phase2 guided --top-k-pools 0,5,10,20
+  slm_experiments phase2 kvl_beam --widths 1,4,6,8
+  # phase2 beam is deprecated (hard-fails at temperature=0)
 
 Human review
   slm_experiments human export --run-id <run_id>
@@ -115,10 +115,9 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=_examples(
             "slm_experiments phase2 weights",
-            "slm_experiments phase2 beam --widths 4,8,10",
-            "slm_experiments phase2 guided --top-k-pools 5,10,20",
-            "slm_experiments phase2 kvl_beam --widths 4,8",
             "slm_experiments phase2 prompting --shots 0,1,3 --prompts all",
+            "slm_experiments phase2 guided --top-k-pools 0,5,10,20",
+            "slm_experiments phase2 kvl_beam --widths 1,4,6,8",
         ),
     )
     p2_sub = p2.add_subparsers(dest="sweep", required=True)
@@ -173,16 +172,19 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=_examples(
             "slm_experiments phase2 guided",
-            "slm_experiments phase2 guided --top-k-pools 5,10,20",
-            "slm_experiments phase2 kvl_beam --widths 4,8",
+            "slm_experiments phase2 guided --top-k-pools 0,5,10,20",
+            "slm_experiments phase2 kvl_beam --widths 1,4,6,8",
             "slm_experiments phase2 guided --mode trie --models Qwen3 --prompts all",
         ),
     )
     p2_guided.add_argument(
         "--top-k-pools",
-        default="5,10,20",
+        default="0,5,10,20",
         metavar="VALUES",
-        help="Comma-separated guided top-k pool sizes (default: %(default)s)",
+        help=(
+            "Comma-separated guided top-k pool sizes; 0 = unconstrained in-run "
+            "baseline (default: %(default)s)"
+        ),
     )
     p2_guided.add_argument(
         "--mode",
@@ -202,15 +204,18 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=_examples(
             "slm_experiments phase2 kvl_beam",
-            "slm_experiments phase2 kvl_beam --widths 4,8",
+            "slm_experiments phase2 kvl_beam --widths 1,4,6,8",
             "slm_experiments phase2 kvl_beam --models Qwen3 --prompts 1 --widths 4",
         ),
     )
     p2_kvl_beam.add_argument(
         "--widths",
-        default="4,8",
+        default="1,4,6,8",
         metavar="VALUES",
-        help="Comma-separated KVL beam widths (default: %(default)s)",
+        help=(
+            "Comma-separated KVL beam widths; 1 = greedy in-run baseline "
+            "(default: %(default)s)"
+        ),
     )
     p2_kvl_beam.add_argument(
         "--branch-factor",
@@ -408,25 +413,12 @@ def main(argv: list[str] | None = None) -> None:
 
         if args.sweep == "beam":
             print(
-                "WARNING: phase2 beam is deprecated. At temperature=0 all beam "
-                "candidates are identical. Use phase2 kvl_beam or phase2 guided "
-                "instead.",
+                "ERROR: phase2 beam is deprecated and excluded from thesis claims. "
+                "At temperature=0 all best-of-N candidates are identical. "
+                "Use phase2 kvl_beam or phase2 guided instead.",
                 file=sys.stderr,
             )
-            from slm_experiments.phase2.beam import BeamSweepRunner
-
-            runner = BeamSweepRunner()
-            run_id, out_dir = runner.run(
-                widths=args.widths,
-                prompts=args.prompts,
-                models=args.models,
-                seed=args.seed,
-                no_plot=args.no_plot,
-                cli_args=cli_args,
-            )
-            print(f"Run complete: {run_id}")
-            print(f"Output: {Path(out_dir).resolve()}")
-            return
+            sys.exit(1)
 
         if args.sweep == "guided":
             from slm_experiments.phase2.guided import GuidedSweepRunner
@@ -573,20 +565,63 @@ def main(argv: list[str] | None = None) -> None:
         sweep_sections = {
             "weight_factor": "by_weight_factor",
             "beam_width": "by_beam_width",
+            "kvl_beam_width": "by_kvl_beam_width",
             "num_shots": "by_num_shots",
             "guided_top_k": "by_guided_top_k",
         }
         sweep_section = sweep_sections.get(sweep_dimension or "")
         sweep_stats = summary.get(sweep_section or "", {})
         if sweep_stats:
-            print(f"\nBy {sweep_dimension}:")
+            print(f"\nBy {sweep_dimension} (pooled):")
             for group_name, group_stats in sweep_stats.items():
                 count = group_stats.get("count", 0)
                 fk = group_stats.get("flesch_kincaid_grade", {}).get("mean")
+                a1 = group_stats.get("a1_pass_rate")
+                extras = []
                 if fk is not None:
-                    print(f"  {group_name}: n={count}, FK mean={fk:.2f}")
-                else:
-                    print(f"  {group_name}: n={count}")
+                    extras.append(f"FK mean={fk:.2f}")
+                if a1 is not None:
+                    extras.append(f"a1_pass_rate={a1:.2f}")
+                suffix = f", {', '.join(extras)}" if extras else ""
+                print(f"  {group_name}: n={count}{suffix}")
+
+        by_model = summary.get("by_model", {})
+        if by_model:
+            print("\nBy model:")
+            for model_name, model_stats in by_model.items():
+                count = model_stats.get("count", 0)
+                a1 = model_stats.get("a1_pass_rate")
+                fail = model_stats.get("generation_failure_rate")
+                parts = [f"n={count}"]
+                if a1 is not None:
+                    parts.append(f"a1_pass_rate={a1:.2f}")
+                if fail is not None:
+                    parts.append(f"failure_rate={fail:.2f}")
+                print(f"  {model_name}: {', '.join(parts)}")
+                nested_sweep = model_stats.get(sweep_section or "", {})
+                if nested_sweep:
+                    for group_name, group_stats in nested_sweep.items():
+                        g_count = group_stats.get("count", 0)
+                        g_a1 = group_stats.get("a1_pass_rate")
+                        g_fk = group_stats.get("flesch_kincaid_grade", {}).get("mean")
+                        g_parts = [f"n={g_count}"]
+                        if g_a1 is not None:
+                            g_parts.append(f"a1_pass_rate={g_a1:.2f}")
+                        if g_fk is not None:
+                            g_parts.append(f"FK mean={g_fk:.2f}")
+                        print(f"    {group_name}: {', '.join(g_parts)}")
+                nested_config = model_stats.get("by_config", {})
+                if nested_config and not nested_sweep:
+                    for config_name, config_stats in nested_config.items():
+                        c_count = config_stats.get("count", 0)
+                        c_a1 = config_stats.get("a1_pass_rate")
+                        c_fk = config_stats.get("flesch_kincaid_grade", {}).get("mean")
+                        c_parts = [f"n={c_count}"]
+                        if c_a1 is not None:
+                            c_parts.append(f"a1_pass_rate={c_a1:.2f}")
+                        if c_fk is not None:
+                            c_parts.append(f"FK mean={c_fk:.2f}")
+                        print(f"    {config_name}: {', '.join(c_parts)}")
         return
 
     print(f"Not implemented: {args.command}", file=sys.stderr)
