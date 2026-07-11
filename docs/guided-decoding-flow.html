@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Guided Decoding Flow — SLMs-experiments</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface-2: #242836;
+      --border: #2e3345;
+      --text: #e8eaf0;
+      --muted: #8b92a8;
+      --accent: #6c9eff;
+      --green: #4ade80;
+      --green-dim: #22c55e22;
+      --amber: #fbbf24;
+      --amber-dim: #fbbf2422;
+      --red: #f87171;
+      --red-dim: #f8717122;
+      --purple: #c084fc;
+      --purple-dim: #c084fc22;
+      --teal: #2dd4bf;
+      --teal-dim: #2dd4bf22;
+      --gray: #4b5563;
+      --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+      --mono: ui-monospace, "Cascadia Code", "SF Mono", monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    .hero {
+      background: linear-gradient(135deg, #141824 0%, #1a2840 50%, #1a2035 100%);
+      border-bottom: 1px solid var(--border);
+      padding: 2.5rem 1.5rem 2rem;
+      text-align: center;
+    }
+
+    .hero h1 {
+      font-size: clamp(1.5rem, 4vw, 2.2rem);
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      margin-bottom: 0.5rem;
+    }
+
+    .hero p {
+      color: var(--muted);
+      max-width: 680px;
+      margin: 0 auto;
+      font-size: 1rem;
+    }
+
+    .container {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 2rem 1.25rem 3rem;
+    }
+
+    .context-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem 1.5rem;
+      margin-bottom: 2rem;
+    }
+
+    .context-box h2 {
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 0.75rem;
+    }
+
+    .prompt {
+      font-family: var(--mono);
+      font-size: 0.9rem;
+      background: var(--surface-2);
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      margin-bottom: 0.75rem;
+    }
+
+    .params { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+
+    .param {
+      font-size: 0.8rem;
+      font-family: var(--mono);
+      background: var(--surface-2);
+      padding: 0.25rem 0.6rem;
+      border-radius: 6px;
+      color: var(--accent);
+    }
+
+    .param.inactive { color: var(--muted); border: 1px dashed var(--border); }
+
+    .step {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem 1.5rem;
+      margin-bottom: 1.25rem;
+    }
+
+    .step-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.75rem;
+      height: 1.75rem;
+      background: var(--accent);
+      color: var(--bg);
+      font-weight: 700;
+      font-size: 0.85rem;
+      border-radius: 50%;
+      margin-right: 0.5rem;
+    }
+
+    .step h3 { display: inline; font-size: 1.1rem; font-weight: 600; }
+
+    .step-desc {
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin: 0.75rem 0 1rem;
+    }
+
+    .token-grid { display: flex; flex-direction: column; gap: 0.45rem; }
+
+    .token-row {
+      display: grid;
+      grid-template-columns: 6.5rem 1fr 3rem 3.5rem 4.5rem;
+      align-items: center;
+      gap: 0.6rem;
+      padding: 0.4rem 0.6rem;
+      border-radius: 8px;
+    }
+
+    .token-row.header {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      padding-bottom: 0.25rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .token-row.eliminated {
+      opacity: 0.38;
+      text-decoration: line-through;
+      background: var(--surface-2);
+    }
+
+    .token-row.survives {
+      background: var(--green-dim);
+      border: 1px solid #22c55e33;
+    }
+
+    .token-row.pool {
+      background: var(--purple-dim);
+      border: 1px solid #c084fc44;
+    }
+
+    .token-row.chosen {
+      background: var(--amber-dim);
+      border: 2px solid var(--amber);
+      font-weight: 600;
+      opacity: 1;
+      text-decoration: none;
+    }
+
+    .token-name { font-family: var(--mono); font-size: 0.82rem; }
+
+    .a1-badge {
+      font-size: 0.62rem;
+      background: var(--green-dim);
+      color: var(--green);
+      padding: 0.1rem 0.35rem;
+      border-radius: 4px;
+      margin-left: 0.3rem;
+      text-decoration: none;
+    }
+
+    .cut-badge {
+      font-size: 0.65rem;
+      font-family: var(--mono);
+      padding: 0.1rem 0.4rem;
+      border-radius: 4px;
+      text-align: center;
+      text-decoration: none;
+    }
+
+    .cut-badge.topk { background: #6c9eff22; color: var(--accent); }
+    .cut-badge.topp { background: #fbbf2422; color: var(--amber); }
+    .cut-badge.guided { background: #c084fc22; color: var(--purple); }
+    .cut-badge.prev { background: var(--surface-2); color: var(--muted); }
+
+    .bar-wrap {
+      height: 1.25rem;
+      background: var(--surface-2);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .bar { height: 100%; border-radius: 4px; min-width: 2px; }
+    .bar.raw { background: var(--accent); }
+    .bar.survives { background: var(--green); }
+    .bar.pool { background: var(--purple); }
+
+    .prob, .cum, .status {
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      color: var(--muted);
+      text-align: right;
+    }
+
+    .note {
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-top: 0.75rem;
+      padding: 0.6rem 0.85rem;
+      background: var(--surface-2);
+      border-radius: 8px;
+      border-left: 3px solid var(--accent);
+    }
+
+    .note.amber { border-left-color: var(--amber); }
+    .note.green { border-left-color: var(--green); }
+    .note strong { color: var(--text); }
+
+    .arrow-down {
+      text-align: center;
+      color: var(--muted);
+      font-size: 1.5rem;
+      margin: -0.25rem 0;
+    }
+
+    .result-box {
+      background: linear-gradient(135deg, var(--amber-dim), var(--green-dim));
+      border: 2px solid var(--amber);
+      border-radius: 12px;
+      padding: 1.5rem;
+      text-align: center;
+      margin-top: 1rem;
+    }
+
+    .result-box .label {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }
+
+    .result-box .token {
+      font-family: var(--mono);
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--amber);
+    }
+
+    .compare {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+
+    @media (max-width: 640px) {
+      .token-row {
+        grid-template-columns: 5rem 1fr 2.5rem 2.5rem 3.5rem;
+        font-size: 0.78rem;
+      }
+      .compare { grid-template-columns: 1fr; }
+    }
+
+    .compare-card {
+      background: var(--surface-2);
+      border-radius: 8px;
+      padding: 1rem;
+      text-align: center;
+    }
+
+    .compare-card .title { font-size: 0.75rem; color: var(--muted); margin-bottom: 0.35rem; }
+    .compare-card .value { font-family: var(--mono); font-size: 1.1rem; }
+    .compare-card.guided .value { color: var(--amber); }
+    .compare-card.greedy .value { color: var(--red); }
+
+    .cascade {
+      margin-top: 2rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem 1.5rem;
+    }
+
+    .cascade h3 { font-size: 1rem; margin-bottom: 1rem; }
+
+    .cascade-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+
+    .cascade-table th {
+      text-align: left;
+      color: var(--muted);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 0.4rem 0.6rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .cascade-table td {
+      padding: 0.45rem 0.6rem;
+      border-bottom: 1px solid var(--border);
+      font-family: var(--mono);
+      font-size: 0.8rem;
+    }
+
+    .cascade-table tr:last-child td { border-bottom: none; }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    .legend span { display: inline-flex; align-items: center; gap: 0.35rem; }
+    .legend .dot { width: 0.65rem; height: 0.65rem; border-radius: 50%; }
+
+    .flow-chain {
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      line-height: 2.2;
+      color: var(--muted);
+      margin-top: 1rem;
+    }
+
+    .flow-chain span {
+      display: inline-block;
+      padding: 0.15rem 0.5rem;
+      margin: 0.1rem;
+      border-radius: 4px;
+      background: var(--surface-2);
+    }
+
+    .flow-chain .hl { color: var(--accent); }
+    .flow-chain .hl2 { color: var(--amber); }
+    .flow-chain .hl3 { color: var(--purple); }
+    .flow-chain .hl4 { color: var(--green); }
+    .flow-chain .hl5 { color: var(--teal); }
+    .flow-chain .dim { color: var(--gray); text-decoration: line-through; }
+  </style>
+</head>
+<body>
+
+  <header class="hero">
+    <h1>Guided Decoding — Every Filter Matters</h1>
+    <p>One decoding step where <strong>top_k</strong> and <strong>guided_top_k</strong> each remove tokens — with temperature fixed at 0. <code>top_p</code> is not used in the repo.</p>
+  </header>
+
+  <main class="container">
+
+    <section class="context-box">
+      <h2>Scenario</h2>
+      <p class="prompt">Prompt so far: <em>"A library is a place where you can ___"</em> — pick the next token.</p>
+      <div class="params">
+        <span class="param">temperature = 0</span>
+        <span class="param">top_k = 5</span>
+        <span class="param">guided_top_k = 3</span>
+        <span class="param">mode = flat</span>
+      </div>
+      <p style="margin-top:0.75rem;font-size:0.82rem;color:var(--muted)">
+        Toy probabilities (8 tokens shown). Matches live code: <code>temperature=0.0</code>, vocabulary cap via <code>top_k</code> only (no nucleus / <code>top_p</code>).
+      </p>
+    </section>
+
+    <div class="legend">
+      <span><span class="dot" style="background:var(--accent)"></span> Raw</span>
+      <span><span class="dot" style="background:var(--green)"></span> Survives</span>
+      <span><span class="dot" style="background:var(--purple)"></span> Guided pool</span>
+      <span><span class="dot" style="background:var(--amber)"></span> Chosen</span>
+      <span><span class="dot" style="background:var(--gray)"></span> Eliminated</span>
+    </div>
+
+    <!-- Step 0: temperature -->
+    <section class="step">
+      <span class="step-num">0</span>
+      <h3>temperature = 0 — logits pass through unchanged</h3>
+      <p class="step-desc">The code only divides logits by temperature when it is &gt; 0. At 0, logits are used as-is. No randomness is introduced — but the filters below still reshape the candidate set.</p>
+      <p class="note green"><strong>No effect on ranking.</strong> Global argmax is still <code>sophisticated</code> (40%). Temperature does not participate in pool building here; it would only matter for stochastic sampling.</p>
+    </section>
+
+    <div class="arrow-down">↓</div>
+
+    <!-- Step 1: Raw logits -->
+    <section class="step">
+      <span class="step-num">1</span>
+      <h3>Raw logits (after temperature = 0)</h3>
+      <p class="step-desc">Model scores for the 8 most relevant candidates. Four are A1 vocabulary words.</p>
+      <div class="token-grid">
+        <div class="token-row header">
+          <span>Token</span><span>Prob bar</span><span>Prob</span><span>Cum.</span><span>Status</span>
+        </div>
+        <div class="token-row"><span class="token-name">sophisticated</span><div class="bar-wrap"><div class="bar raw" style="width:100%"></div></div><span class="prob">40%</span><span class="cum">40%</span><span class="status">argmax</span></div>
+        <div class="token-row"><span class="token-name">complex</span><div class="bar-wrap"><div class="bar raw" style="width:62%"></div></div><span class="prob">25%</span><span class="cum">65%</span><span></span></div>
+        <div class="token-row"><span class="token-name">big<span class="a1-badge">A1</span></span><div class="bar-wrap"><div class="bar raw" style="width:37%"></div></div><span class="prob">15%</span><span class="cum">80%</span><span></span></div>
+        <div class="token-row"><span class="token-name">elaborate</span><div class="bar-wrap"><div class="bar raw" style="width:25%"></div></div><span class="prob">10%</span><span class="cum">90%</span><span></span></div>
+        <div class="token-row"><span class="token-name">large<span class="a1-badge">A1</span></span><div class="bar-wrap"><div class="bar raw" style="width:12%"></div></div><span class="prob">5%</span><span class="cum">95%</span><span></span></div>
+        <div class="token-row"><span class="token-name">good<span class="a1-badge">A1</span></span><div class="bar-wrap"><div class="bar raw" style="width:7%"></div></div><span class="prob">3%</span><span class="cum">98%</span><span></span></div>
+        <div class="token-row"><span class="token-name">read<span class="a1-badge">A1</span></span><div class="bar-wrap"><div class="bar raw" style="width:4%"></div></div><span class="prob">1.5%</span><span class="cum">99.5%</span><span></span></div>
+        <div class="token-row"><span class="token-name">the</span><div class="bar-wrap"><div class="bar raw" style="width:2%"></div></div><span class="prob">0.5%</span><span class="cum">100%</span><span></span></div>
+      </div>
+    </section>
+
+    <div class="arrow-down">↓</div>
+
+    <!-- Step 2: top_k -->
+    <section class="step">
+      <span class="step-num">2</span>
+      <h3>top_k = 5 — cut ranks 6–8</h3>
+      <p class="step-desc">Keep only the 5 highest logits. Everything else is set to −∞.</p>
+      <div class="token-grid">
+        <div class="token-row header">
+          <span>Token</span><span>Bar</span><span>Prob</span><span>Rank</span><span>Cut by</span>
+        </div>
+        <div class="token-row survives"><span class="token-name">sophisticated</span><div class="bar-wrap"><div class="bar survives" style="width:100%"></div></div><span class="prob">40%</span><span class="status">#1</span><span></span></div>
+        <div class="token-row survives"><span class="token-name">complex</span><div class="bar-wrap"><div class="bar survives" style="width:62%"></div></div><span class="prob">25%</span><span class="status">#2</span><span></span></div>
+        <div class="token-row survives"><span class="token-name">big<span class="a1-badge">A1</span></span><div class="bar-wrap"><div class="bar survives" style="width:37%"></div></div><span class="prob">15%</span><span class="status">#3</span><span></span></div>
+        <div class="token-row survives"><span class="token-name">elaborate</span><div class="bar-wrap"><div class="bar survives" style="width:25%"></div></div><span class="prob">10%</span><span class="status">#4</span><span></span></div>
+        <div class="token-row survives"><span class="token-name">large<span class="a1-badge">A1</span></span><div class="bar-wrap"><div class="bar survives" style="width:12%"></div></div><span class="prob">5%</span><span class="status">#5</span><span></span></div>
+        <div class="token-row eliminated"><span class="token-name">good<span class="a1-badge">A1</span></span><div class="bar-wrap"></div><span class="prob">3%</span><span class="status">#6</span><span class="cut-badge topk">top_k</span></div>
+        <div class="token-row eliminated"><span class="token-name">read<span class="a1-badge">A1</span></span><div class="bar-wrap"></div><span class="prob">1.5%</span><span class="status">#7</span><span class="cut-badge topk">top_k</span></div>
+        <div class="token-row eliminated"><span class="token-name">the</span><div class="bar-wrap"></div><span class="prob">0.5%</span><span class="status">#8</span><span class="cut-badge topk">top_k</span></div>
+      </div>
+      <p class="note"><strong>top_k effect:</strong> Removes <code>good</code>, <code>read</code> (both A1), and <code>the</code>. A1 words outside the top 5 can never be chosen — even before guided runs.</p>
+    </section>
+
+    <div class="arrow-down">↓</div>
+
+    <!-- Step 3: guided pool -->
+    <section class="step">
+      <span class="step-num">3</span>
+      <h3>guided_top_k = 3 — intervention window</h3>
+      <p class="step-desc">From the 5 top_k survivors, take only the top 3 by rank. These are the tokens checked for A1 membership.</p>
+      <div class="token-grid">
+        <div class="token-row header">
+          <span>Token</span><span>Bar</span><span>Prob</span><span>Rank</span><span>Cut by</span>
+        </div>
+        <div class="token-row pool"><span class="token-name">sophisticated</span><div class="bar-wrap"><div class="bar pool" style="width:100%"></div></div><span class="prob">40%</span><span class="status">#1</span><span>in pool</span></div>
+        <div class="token-row pool"><span class="token-name">complex</span><div class="bar-wrap"><div class="bar pool" style="width:62%"></div></div><span class="prob">25%</span><span class="status">#2</span><span>in pool</span></div>
+        <div class="token-row pool"><span class="token-name">big<span class="a1-badge">A1</span></span><div class="bar-wrap"><div class="bar pool" style="width:37%"></div></div><span class="prob">15%</span><span class="status">#3</span><span>in pool</span></div>
+        <div class="token-row eliminated"><span class="token-name">elaborate</span><div class="bar-wrap"></div><span class="prob">10%</span><span class="status">#4</span><span class="cut-badge guided">guided</span></div>
+        <div class="token-row eliminated"><span class="token-name">large<span class="a1-badge">A1</span></span><div class="bar-wrap"></div><span class="prob">5%</span><span class="status">#5</span><span class="cut-badge guided">guided</span></div>
+        <div class="token-row eliminated"><span class="token-name">good</span><div class="bar-wrap"></div><span class="prob">—</span><span></span><span class="cut-badge prev">top_k</span></div>
+        <div class="token-row eliminated"><span class="token-name">read</span><div class="bar-wrap"></div><span class="prob">—</span><span></span><span class="cut-badge prev">top_k</span></div>
+        <div class="token-row eliminated"><span class="token-name">the</span><div class="bar-wrap"></div><span class="prob">—</span><span></span><span class="cut-badge prev">top_k</span></div>
+      </div>
+      <p class="note"><strong>guided_top_k effect:</strong> <code>elaborate</code> and <code>large</code> (A1) survived top_k but are excluded from the intervention window. Only <code>sophisticated</code>, <code>complex</code>, <code>big</code> are considered.</p>
+    </section>
+
+    <div class="arrow-down">↓</div>
+
+    <!-- Step 4: A1 -->
+    <section class="step">
+      <span class="step-num">4</span>
+      <h3>A1 filter — first A1 token in pool wins</h3>
+      <p class="step-desc">Scan pool in rank order. Skip non-A1. Pick the first A1 hit.</p>
+      <div class="token-grid">
+        <div class="token-row eliminated"><span class="token-name">sophisticated</span><div class="bar-wrap"></div><span class="prob">not A1</span><span>skip</span><span></span></div>
+        <div class="token-row eliminated"><span class="token-name">complex</span><div class="bar-wrap"></div><span class="prob">not A1</span><span>skip</span><span></span></div>
+        <div class="token-row chosen"><span class="token-name">big<span class="a1-badge">A1</span></span><div class="bar-wrap"><div class="bar survives" style="width:100%"></div></div><span class="prob">A1 ✓</span><span>pick!</span><span></span></div>
+      </div>
+      <p class="note green"><strong>Guided effect:</strong> Overrides global argmax (<code>sophisticated</code>) because <code>big</code> is A1 and sits at rank #3 in the pool.</p>
+    </section>
+
+    <div class="arrow-down">↓</div>
+
+    <!-- Step 5: Result -->
+    <section class="step">
+      <span class="step-num">5</span>
+      <h3>Result</h3>
+      <div class="result-box">
+        <div class="label">Token appended</div>
+        <div class="token">"big"</div>
+      </div>
+      <div class="compare">
+        <div class="compare-card guided">
+          <div class="title">Guided decoding</div>
+          <div class="value">"big" (A1, rank #3)</div>
+        </div>
+        <div class="compare-card greedy">
+          <div class="title">Plain greedy (temp=0)</div>
+          <div class="value">"sophisticated"</div>
+        </div>
+      </div>
+      <p class="note" style="margin-top:1rem"><strong>Fallback:</strong> If <code>big</code> were also cut (e.g. by a smaller guided_top_k), no A1 token would remain in the pool → global argmax <code>sophisticated</code> would be used instead.</p>
+    </section>
+
+    <!-- Cascade summary -->
+    <section class="cascade">
+      <h3>Who cut what? (temperature = 0 throughout)</h3>
+      <table class="cascade-table">
+        <thead>
+          <tr>
+            <th>Token</th>
+            <th>A1?</th>
+            <th>Rank</th>
+            <th>Eliminated by</th>
+            <th>Why it matters</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>sophisticated</td><td>no</td><td>#1</td><td>—</td><td style="font-family:var(--font)">Global argmax; skipped by A1 filter</td>
+          </tr>
+          <tr>
+            <td>complex</td><td>no</td><td>#2</td><td>—</td><td style="font-family:var(--font)">Stays in pool; skipped by A1 filter</td>
+          </tr>
+          <tr style="color:var(--amber)">
+            <td>big ✓ chosen</td><td>yes</td><td>#3</td><td>—</td><td style="font-family:var(--font)">Only A1 token that survives top_k + guided_top_k</td>
+          </tr>
+          <tr>
+            <td>elaborate</td><td>no</td><td>#4</td><td style="color:var(--purple)">guided_top_k</td><td style="font-family:var(--font)">Survived top_k but outside intervention window</td>
+          </tr>
+          <tr>
+            <td>large</td><td>yes</td><td>#5</td><td style="color:var(--purple)">guided_top_k</td><td style="font-family:var(--font)">A1 word killed by guided pool size (would have been visible without guided_top_k)</td>
+          </tr>
+          <tr>
+            <td>good</td><td>yes</td><td>#6</td><td style="color:var(--accent)">top_k</td><td style="font-family:var(--font)">A1 word killed by vocabulary cap</td>
+          </tr>
+          <tr>
+            <td>read</td><td>yes</td><td>#7</td><td style="color:var(--accent)">top_k</td><td style="font-family:var(--font)">Another A1 word removed by top_k</td>
+          </tr>
+          <tr>
+            <td>the</td><td>no</td><td>#8</td><td style="color:var(--accent)">top_k</td><td style="font-family:var(--font)">Low-probability non-A1 token</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="flow-chain">
+        <span class="dim">temp=0</span> →
+        <span class="hl">top_k=5</span> <small>(−3 tokens)</small> →
+        <span class="hl3">guided_top_k=3</span> <small>(−2 tokens)</small> →
+        <span class="hl4">A1 filter</span> →
+        <span class="hl5">"big"</span>
+      </div>
+    </section>
+
+  </main>
+
+</body>
+</html>

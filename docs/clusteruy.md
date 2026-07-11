@@ -15,7 +15,7 @@ Phase 2 experiments for this repo.
 You are helping run SLM Phase 2 experiments on ClusterUY (Uruguay national HPC cluster).
 
 CONTEXT
-- Repo: SLMs-experiments (this repo). CLI: python -m slm_experiments phase2 {weights|beam|prompting}
+- Repo: SLMs-experiments (this repo). CLI: python -m slm_experiments phase2 {weights|prompting|guided|kvl_beam}
 - ClusterUY does NOT run Docker. Workflow: build image with Docker locally → push to Docker Hub →
   pull as Singularity .sif on cluster → run with singularity exec --nv
 - GPU: Tesla P100 (sm_60). Phi-3 needs GPU; other models run on CPU inside the container.
@@ -50,8 +50,10 @@ SBATCH SCRIPTS (submit from login node):
   cd ~/SLMs-experiments
   sbatch scripts/clusteruy/smoke_test.sh
   sbatch scripts/clusteruy/run_phase2_weights.sh
-  sbatch scripts/clusteruy/run_phase2_beam.sh
   sbatch scripts/clusteruy/run_phase2_prompting.sh
+  sbatch scripts/clusteruy/run_phase2_kvl_beam.sh
+  # run_phase2_beam.sh is deprecated (hard-fails) — use kvl_beam or guided
+  # guided: python -m slm_experiments phase2 guided --prompts all --no-plot
 
 DOWNLOAD RESULTS (from user's local machine, port 10022):
   rsync -avz -e "ssh -p 10022" \
@@ -211,14 +213,17 @@ Ref: [Cómo ejecutar un trabajo](https://www.cluster.uy/ayuda/como_ejecutar/)
 | Script | Sweep | Observations (`--prompts all`) | Time limit |
 |--------|-------|-------------------------------|------------|
 | `scripts/clusteruy/run_phase2_weights.sh` | 7 weight factors | 700 | 12 h |
-| `scripts/clusteruy/run_phase2_beam.sh` | 3 beam widths | 300 | 24 h |
 | `scripts/clusteruy/run_phase2_prompting.sh` | 3 shot counts | 300 | 12 h |
+| `scripts/clusteruy/run_phase2_kvl_beam.sh` | 2 KVL beam widths | 200 | (see script) |
+| `scripts/clusteruy/run_phase2_beam.sh` | **Deprecated** | — | exits 1 |
 
 ```bash
 cd ~/SLMs-experiments
 sbatch scripts/clusteruy/run_phase2_weights.sh
-sbatch scripts/clusteruy/run_phase2_beam.sh
 sbatch scripts/clusteruy/run_phase2_prompting.sh
+sbatch scripts/clusteruy/run_phase2_kvl_beam.sh
+# guided (no dedicated sbatch yet):
+# singularity … python -m slm_experiments phase2 guided --prompts all --no-plot
 ```
 
 Edit `--mail-user` in each script before submitting.

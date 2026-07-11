@@ -18,7 +18,7 @@ Remaining work is mostly **methodological rigor and reporting** (model-stratifie
 | Phase 2 sweep design | Sensible one-at-a-time grids; baselines and cross-model pooling need care |
 | Logit bias | Fixed — `log(weight_factor)` + vocab cleaned at load time |
 | Beam search | Fixed — stop tokens, cleaned scoring, per-beam content words, response-only text |
-| Summary / sweep buckets | Sweep sections added; pass rates added; still needs `by_model` stratification |
+| Summary / sweep buckets | Sweep sections + `by_model` stratification; proxy pass rates |
 | Publishable claims today | Use `--prompts all` (25) for formal claims. Weighting and beam paths are trustworthy after re-run. A1 pass rate is now computed in code. |
 
 ---
@@ -51,15 +51,15 @@ Remaining work is mostly **methodological rigor and reporting** (model-stratifie
 | 5 | **Vocabulary list includes punctuation & stop tokens** | **Fixed** (`9666a01`) | Removed from file + `_SKIP_VOCAB_ENTRIES` at load time |
 | 6 | **Default n=3 prompts is underpowered** | **By design** | See [Default prompt count](#default-prompt-count-n3) below |
 | 7 | **Summary `count` includes failures; means exclude them** | **Partial** (`1207c3d`) | Added `generation_successful_count` and `generation_failure_rate`; `count` still means total observations |
-| 8 | **Phase 2 summaries pool across models** | **Open** | `by_weight_factor` etc. have no `by_model` breakdown |
+| 8 | **Phase 2 summaries pool across models** | **Fixed** | `summary.json` includes `by_model` with nested `by_config` / sweep keys |
 
 ### Consider — methodological weaknesses
 
 | # | Issue | Status | Notes |
 |---|-------|--------|-------|
 | 9 | **Prompting few-shot leakage** | **Fixed** | Varied shot examples (definition, how-to, descriptive); none overlap evaluation prompts |
-| 10 | **Stochastic RNG advances across conditions** | Open | One seed per model, sequential loop at temp=0.7; condition order can entangle with sampling noise |
-| 11 | **Phase 2 weight sweep: docs say greedy, code uses temp=0.7** | Open | Doc/code mismatch in `ExperimentDesign.md` vs `phase2/weights.py` |
+| 10 | **Stochastic RNG advances across conditions** | **Superseded** | All experiments use `temperature=0.0` (greedy); seed replications no longer add sampling noise — use paired-by-prompt analysis |
+| 11 | **Phase 2 weight sweep: docs say greedy, code uses temp=0.7** | **Superseded** | Code and docs aligned on `temperature=0.0`; `top_p` removed |
 | 12 | **`weight_factor=1.0` still passes zero-bias dict** | Open | Unlike `logit_bias=None` when weighting off; baseline in weight sweep ≠ Phase 1 `prompting_only` |
 | 13 | **Failure exclusion → survivorship bias** | Open | Interventions that cause more empty outputs look better on conditional means; mitigated partially by `generation_failure_rate` |
 | 14 | **Beam optimizes same vocab used for logit bias; outcomes judged by readability** | Open | Circular optimization; no fluency/coherence check |
@@ -78,7 +78,7 @@ The **default is intentional**, not a bug: it prevents accidentally launching a 
 | Smoke / dev (default) | `phase1` or `--prompts 3` | 4 × 4 × 3 = **48** |
 | Formal / publishable claims | `--prompts all` | 4 × 4 × 25 = **400** |
 
-Documented in `ExperimentDesign.md` and `AGENT.md`. For any claim about intervention effect size, use `--prompts all` and consider 3–5 seed replications per cell.
+Documented in `ExperimentDesign.md` and `AGENT.md`. For any claim about intervention effect size, use `--prompts all`. Under `temperature=0.0`, prefer paired-by-prompt contrasts within model rather than multi-seed sampling replications.
 
 ---
 
@@ -129,7 +129,7 @@ Documented in `ExperimentDesign.md` and `AGENT.md`. For any claim about interven
 | 6 | Full sample size for claims — `--prompts all` (25); seed replications | **Usage policy** (default n=3 stays for safety) |
 | 7 | Per-observation seeds — `hash(model, prompt, config, rep)` | **Open** |
 | 8 | Report failure rate alongside means | **Partial** (`1207c3d`) — `generation_successful_count` added |
-| 9 | Add `by_model` × sweep breakdown in `summary.json` | **Open** |
+| 9 | Add `by_model` × sweep breakdown in `summary.json` | **Done** |
 | 10 | Disjoint few-shot examples from evaluation prompts | **Done** |
 | 11 | Align weight sweep with docs — greedy temp or update docs | **Open** |
 

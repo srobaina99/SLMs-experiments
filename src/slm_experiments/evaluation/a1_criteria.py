@@ -19,7 +19,11 @@ def meets_a1_criteria(
     generation_valid: bool,
     thresholds: A1ReadabilityThresholds = DEFAULT_A1_THRESHOLDS,
 ) -> bool:
-    """Return True when valid generation meets all three A1 readability thresholds."""
+    """Return True when a valid generation passes the automated readability proxy.
+
+    This is a conjunction of US readability formula thresholds (FK / Fog / Spache),
+    not a CEFR A1 communicative assessment. The function/field name is historical.
+    """
     if not generation_valid:
         return False
     return (

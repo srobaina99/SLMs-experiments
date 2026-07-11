@@ -4,7 +4,7 @@ Formal specification for the SLM evaluation framework. Phase 1 establishes inter
 
 ## Context
 
-This project evaluates whether small language models (SLMs) can produce pedagogically appropriate English for CEFR A1 learners — non-English speakers with little to no prior exposure. Four models are tested across inference-time interventions that aim to simplify vocabulary and sentence structure.
+This project evaluates whether inference-time interventions make small language models (SLMs) produce simpler English answers for beginner learners. Prompts are themed around CEFR A1 topics; the primary binary outcome is an **automated readability proxy** (not a CEFR proficiency test). Four models are tested across interventions that aim to simplify vocabulary and sentence structure.
 
 ## Models
 
@@ -23,7 +23,7 @@ Two inference-time interventions plus a control:
 
 ### 1. Probability Weighting (Logit Bias)
 
-Boosts A1 vocabulary tokens during decoding. The 487-word list in `data/vocabularies/filtered_starters_vocab.txt` is tokenized and mapped to a `logit_bias` dictionary passed to llama.cpp. `weight_factor` is the target probability multiplier; the code applies `log(weight_factor)` as the additive logit bias (`1.0` = no bias). See [docs/interventions.md](docs/interventions.md).
+Boosts A1 vocabulary tokens during decoding. The 487-word list in `data/vocabularies/filtered_starters_vocab.txt` is tokenized in both mid-sentence (`" " + word`) and sentence-start (`word`) forms; the union of those token IDs is mapped to a `logit_bias` dictionary passed to llama.cpp. `weight_factor` is the target probability multiplier; the code applies `log(weight_factor)` as the additive logit bias (`1.0` = no bias). See [docs/interventions.md](docs/interventions.md).
 
 ### 2. Contextual Prompting
 
@@ -83,25 +83,26 @@ No weighting, no contextual prompting.
 | Parameter | Value |
 |-----------|-------|
 | System prompt | "You are a helpful English teacher for beginner students. Answer with a paragraph only with plain text" |
-| Temperature | 0.7 |
+| Temperature | 0.0 (deterministic greedy decoding) |
 | Top-K | 50 |
-| Top-P | 0.95 |
 | Max tokens | 200 |
 | Context window | 2048 (4096 for Phi3) |
-| Seed | Configurable via `--seed` (default: 42) |
+| Seed | Configurable via `--seed` (default: 42; library init only — no sampling variance at temp 0) |
+
+`top_p` is **not** used. Source of truth: `src/slm_experiments/core/config.py`.
 
 ### Observation Counts
 
 | Prompts | Observations |
 |---------|-------------|
-| 3 (default) | 4 × 4 × 3 = 48 |
-| 25 (`--prompts all`) | 4 × 4 × 25 = 400 |
+| 3 (default, development/smoke only) | 4 × 4 × 3 = 48 |
+| 25 (`--prompts all`, formal claims) | 4 × 4 × 25 = 400 |
 
-### Success Criteria
+### Success Criteria (automated readability proxy)
 
 **Generation success** (`generation_successful=True`) means the model produced valid, non-empty output with computable metrics. Failed generations (empty output, thinking-tag artifacts, metric computation errors) are recorded with `generation_successful=False` and excluded from summary metric means.
 
-**A1 pass** (`meets_a1_criteria=True`) means all three readability thresholds are met on a valid generation:
+**Readability proxy pass** (`meets_a1_criteria=True`) is an **automated US readability gate**, not a CEFR A1 communicative assessment. Prompt themes are CEFR-inspired; the binary flag only checks that all three formula thresholds hold on a valid generation:
 
 | Metric | Threshold |
 |--------|-----------|
@@ -111,7 +112,7 @@ No weighting, no contextual prompting.
 
 SMOG is **not** used — short model outputs cannot satisfy its 30-sentence minimum.
 
-`summary.json` reports `a1_pass_rate` and `a1_pass_count` across all observations; metric means still exclude failed generations.
+The field name `meets_a1_criteria` is historical. Treat `a1_pass_rate` / `a1_pass_count` in `summary.json` as **proxy pass rate / count**. Human ratings (`human export` / `import`) assess agreement with this proxy; they are not folded into the automatic flag. Metric means still exclude failed generations.
 
 ## Phase 2 — Hyperparameter Sweeps
 
@@ -135,29 +136,11 @@ Default grid: `1.0,1.3,1.5,2.0,2.5,3.0,4.0`
 
 Beam search disabled (greedy decoding with logit bias).
 
-### 2b. Beam Search Width Sweep
+### 2b. Beam Search Width Sweep — **Deprecated / excluded**
 
-**Intervention:** Beam search with A1-ratio candidate selection
+> **Do not cite.** At `temperature=0.0`, best-of-N repeats identical greedy decodes, so beam width cannot change the answer. The CLI hard-fails on `phase2 beam`. Historical code remains in `phase2/beam.py` / `models/beam.py`; use **2d guided** or **2e KVL beam** instead.
 
-| Beam Width | Candidates | Selection |
-|------------|-----------|-----------|
-| 4 | 4 sequences | Highest A1 ratio |
-| 8 | 8 sequences | Highest A1 ratio |
-| 10 | 10 sequences | Highest A1 ratio |
-
-Default grid: `4,8,10`
-
-- Contextual prompting: enabled (zero-shot)
-- Logit bias: disabled
-- Temperature: 0.7, Top-P: 0.95, Top-K: 50
-
-**A1 ratio formula:**
-
-```
-A1_ratio = (Count of A1 words × 1.5) / Count of content words
-```
-
-Content words identified via NLTK POS tagging with heuristic fallback.
+Former design (best-of-N + A1-ratio rerank, grids `4,8,10`, prompting ON, weighting OFF) is void under current defaults. Exclude any `results/runs/*_phase2_beam/` tables from thesis claims.
 
 ### 2c. Prompting Shot Sweep
 
@@ -171,7 +154,7 @@ Content words identified via NLTK POS tagging with heuristic fallback.
 
 Default grid: `0,1,3`
 
-Weighting and beam search disabled.
+Weighting and beam search disabled. Temperature 0.0, top-k 50.
 
 **Zero-shot context block:**
 
@@ -198,6 +181,35 @@ Question: What can I find in a park?
 Answer: You can find grass, trees, and benches in a park. Children play there.
 ```
 
+### 2d. Guided Decoding Top-K Sweep
+
+**Intervention:** Top-k A1-constrained greedy decoding (`phase2 guided`). Prompting ON (zero-shot), weighting OFF.
+
+| Setting | Default |
+|---------|---------|
+| `guided_top_k` grid | `0,5,10,20` (`0` = in-run unconstrained baseline) |
+| `guided_mode` | `flat` (optional `trie`) |
+| Temperature / top-k | `0.0` / `50` |
+
+**In-run baseline:** pool `0` keeps the same carrier (prompting ON, weighting OFF) but sets `config_guided=False` and uses plain greedy (`pipeline.run()`). Compare `k0` vs `k5`/`k10`/`k20` within the same run bundle.
+
+At each guided step (`guided_top_k` > 0), if any token in the top-`guided_top_k` pool maps to the A1 list, pick the highest-probability A1 token; otherwise take global argmax. See [docs/guided-decoding.md](docs/guided-decoding.md).
+
+### 2e. KVL Beam Width Sweep
+
+**Intervention:** Token-level beam search ranked by Spanish L1 KVL/GLMM scores (`phase2 kvl_beam`). Prompting ON, weighting OFF.
+
+| Setting | Default |
+|---------|---------|
+| `kvl_beam_width` grid | `1,4,6,8` (`1` = in-run greedy baseline) |
+| `kvl_branch_factor` | `10` |
+| `kvl_l1` | `es` |
+| Temperature / top-k | `0.0` / `50` |
+
+**In-run baseline:** width `1` keeps the same carrier but sets `config_kvl_beam=False` and uses plain greedy (`pipeline.run()`), not a one-wide KVL beam. Compare `w1` vs `w4`/`w6`/`w8` within the same run bundle.
+
+**Stopping rule — first-finish (intentional):** returns the **first** finished non-empty candidate in expansion order (not the best KVL-ranked finished hypothesis). **Rationale:** mean KVL does not reward ending a sentence; without early return, “best KVL” tends to stretch to `max_new_tokens` with incoherent padding. KVL still steers beam pruning; first-finish governs when to stop. Do not interpret width 4 vs 6 vs 8 as “better final KVL selection”; treat KVL columns as primary for this arm. See [docs/kvl_beamsearch.md](docs/kvl_beamsearch.md).
+
 ## Output Format
 
 Every run produces a bundle in `results/runs/{run_id}/`:
@@ -221,19 +233,31 @@ All fields including beam metadata (`beam_width`, `a1_ratio`, `candidates_genera
 {
   "overall": { "flesch_kincaid_grade": { "mean": 3.2, "std": 0.5, ... }, ... },
   "by_config": {
-    "control": { "count": 12, "flesch_kincaid_grade": { "mean": 3.5, ... } },
-    "both": { "count": 84, "flesch_kincaid_grade": { "mean": 2.8, ... } }
+    "control": { "count": 12, "a1_pass_rate": 0.25, "flesch_kincaid_grade": { "mean": 3.5, ... } },
+    "both": { "count": 84, "a1_pass_rate": 0.40, "flesch_kincaid_grade": { "mean": 2.8, ... } }
   },
   "by_weight_factor": {
-    "1.5": { "count": 12, "flesch_kincaid_grade": { "mean": 2.9, ... } }
+    "1.5": { "count": 100, "a1_pass_rate": 0.4, "generation_failure_rate": 0.02, "...": "..." }
   },
-  "metadata": { "total_experiments": 96, "sweep_dimension": "weight_factor", ... }
+  "by_model": {
+    "Qwen3": {
+      "count": 25,
+      "a1_pass_rate": 0.48,
+      "by_weight_factor": {
+        "1.5": { "count": 25, "a1_pass_rate": 0.48, "flesch_kincaid_grade": { "mean": 2.7, ... } }
+      }
+    },
+    "TinyLlama": { "by_weight_factor": { "1.5": { "...": "..." } } }
+  },
+  "metadata": { "total_experiments": 700, "sweep_dimension": "weight_factor", ... }
 }
 ```
 
-Phase 1 runs populate `by_config` only. Phase 2 sweeps add a sweep-specific section (`by_weight_factor`, `by_beam_width`, or `by_num_shots`) keyed by the swept hyperparameter. All Phase 2 weight runs share the same intervention flags, so `by_config` collapses to a single bucket (typically `both` or `prompting_only`); use the sweep section for per-grid-point analysis.
+Pooled sections (`by_config`, `by_weight_factor`, …) remain as overview. **Thesis tables should report `by_model` first** (per-model × config or per-model × sweep key) to avoid Simpson’s paradox; pooled figures are secondary.
 
-Failed generations excluded from metric means.
+Phase 1 runs populate `by_config` and `by_model[*].by_config`. Phase 2 sweeps add a sweep-specific section (`by_weight_factor`, `by_num_shots`, `by_guided_top_k`, `by_kvl_beam_width`) and nest the same keys under `by_model`. All Phase 2 weight runs share the same intervention flags, so pooled `by_config` collapses to a single bucket (typically `both`); use the sweep / `by_model` sections for analysis.
+
+Failed generations excluded from metric means; `generation_failure_rate` and proxy `a1_pass_rate` are computed over all rows.
 
 ### manifest.json
 
@@ -258,9 +282,10 @@ Phase 2 sweeps enable within-model hyperparameter optimization curves.
 3. Which models naturally produce simpler output?
 
 **Phase 2:**
-1. What is the optimal weight factor before fluency degrades?
-2. Does beam width continue to improve A1-ratio selection?
-3. How many prompting shots are needed for consistent simplification?
+1. What is the optimal weight factor (per model) before fluency degrades under prompting + weighting?
+2. How many prompting shots are needed for consistent simplification?
+3. Does guided top-k or KVL beam width improve the readability proxy / KVL metrics vs the fixed carrier (per model)?
+4. (Excluded) Deprecated best-of-N beam — do not ask thesis questions of `phase2 beam` runs.
 
 ## Methodological Notes
 

@@ -108,11 +108,11 @@ Computed on **content words** from `cleaned_response` (same NLTK POS extraction 
 
 Failed generations receive zero counts and `None` aggregates, and are excluded from `summary.json` KVL means (same as readability metrics).
 
-## Success Criteria
+## Success Criteria (automated readability proxy)
 
 **Generation success** (`generation_successful=True`) means valid, non-empty output with computable metrics.
 
-**A1 pass** (`meets_a1_criteria=True`) means **all three** primary thresholds are met simultaneously on a valid generation:
+**Readability proxy pass** (`meets_a1_criteria=True`) means **all three** primary US readability thresholds are met simultaneously on a valid generation. This is **not** a CEFR A1 communicative assessment — prompt themes are CEFR-inspired, but the flag only encodes formula thresholds. The field name is historical; report it as a proxy in the thesis.
 
 | Metric | Threshold |
 |--------|-----------|
@@ -120,13 +120,15 @@ Failed generations receive zero counts and `None` aggregates, and are excluded f
 | Gunning Fog | ≤ 6.0 |
 | Spache Readability | ≤ 4.0 |
 
+The three formulas are near-collinear; treat the conjunction as a single proxy gate. Optional human ratings (`human export` / `import`) measure agreement with the automatic flag.
+
 ## SMOG — Not Used
 
 SMOG Index requires a minimum of 30 sentences. Typical model outputs are 1–3 sentences (~30–60 words), causing `textstat.smog_index()` to return 0.0 for nearly all responses. SMOG cannot discriminate between conditions and is excluded from the framework.
 
 ## Failed Generations
 
-When generation fails (empty output, unparseable response, thinking-tag artifacts), metrics are **not computed**. The observation is recorded with `generation_successful=False` and `meets_a1_criteria=False`, and excluded from `summary.json` metric means. A1 pass rate (`a1_pass_rate`) is still computed over all observations.
+When generation fails (empty output, unparseable response, thinking-tag artifacts), metrics are **not computed**. The observation is recorded with `generation_successful=False` and `meets_a1_criteria=False`, and excluded from `summary.json` metric means. Proxy pass rate (`a1_pass_rate`) is still computed over all observations.
 
 ## Metric Selection Rationale
 
@@ -137,7 +139,7 @@ When generation fails (empty output, unparseable response, thinking-tag artifact
 | Vocabulary difficulty (primary-grade) | Spache |
 | Learner-known vocabulary (external) | KVL / GLMM |
 
-These three metrics provide non-redundant coverage calibrated for A1 learners without the SMOG short-text problem.
+These three metrics provide complementary US-readability coverage aimed at very easy text without the SMOG short-text problem. They are a proxy for beginner-friendly output, not a CEFR level certificate.
 
 ## Discarded Metrics
 

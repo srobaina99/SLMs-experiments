@@ -1,6 +1,6 @@
 # SLM Experiments
 
-Evaluate whether inference-time interventions make small language models (0.5B–3.8B) produce CEFR A1-level English for beginner learners.
+Evaluate whether inference-time interventions make small language models (0.5B–3.8B) produce simpler English for beginner learners. Primary binary outcome is an automated readability proxy (`meets_a1_criteria`), not a CEFR proficiency test.
 
 ## Quick Start
 
@@ -34,8 +34,10 @@ python -m slm_experiments phase1 [--prompts N|all] [--models all|Qwen3,...] [--s
 
 # Phase 2 — hyperparameter sweeps (all 4 models)
 python -m slm_experiments phase2 weights   [--weights 1.0,1.5,2.0,4.0]
-python -m slm_experiments phase2 beam      [--widths 4,8,10]
 python -m slm_experiments phase2 prompting [--shots 0,1,3]
+python -m slm_experiments phase2 guided    [--top-k-pools 5,10,20]
+python -m slm_experiments phase2 kvl_beam  [--widths 4,8]
+# phase2 beam is deprecated (hard-fails at temperature=0)
 
 # Post-run utilities
 python -m slm_experiments plot --run-id <id>
@@ -55,8 +57,8 @@ Every run writes a self-contained bundle to `results/runs/{run_id}/`:
 |------|-------------|
 | `manifest.json` | Run metadata, CLI args, observation counts |
 | `specification.csv` | Reduced columns, European decimals (paper-compatible) |
-| `full.csv` | All fields including beam metadata |
-| `summary.json` | Aggregated stats (overall + by_config; Phase 2 adds sweep sections) |
+| `full.csv` | All fields including guided / KVL metadata |
+| `summary.json` | Aggregated stats (overall + by_config + **by_model**; Phase 2 adds sweep sections) |
 | `plots/` | Boxplots (after `plot --run-id`) |
 
 Run ID format: `{YYYYMMDD_HHMMSS}_{phase}_{experiment}`
@@ -84,10 +86,11 @@ Dockerfile lives in the sibling thesis repo:
 | [AGENT.md](AGENT.md) | Agent entry point — structure, CLI, rules |
 | [ExperimentDesign.md](ExperimentDesign.md) | Formal experiment specification |
 | [docs/clusteruy.md](docs/clusteruy.md) | ClusterUY SSH, Singularity, batch jobs |
-| [docs/metrics.md](docs/metrics.md) | Readability metrics and A1 thresholds |
+| [docs/metrics.md](docs/metrics.md) | Readability metrics and proxy thresholds |
 | [docs/models.md](docs/models.md) | GGUF files, chat templates, GPU setup |
-| [docs/interventions.md](docs/interventions.md) | Weighting, prompting, beam mechanics |
-| [docs/guided-decoding.md](docs/guided-decoding.md) | Top-k A1-guided decoding (planned intervention) |
+| [docs/interventions.md](docs/interventions.md) | Weighting, prompting, guided, KVL (beam deprecated) |
+| [docs/guided-decoding.md](docs/guided-decoding.md) | Top-k A1-guided decoding (`phase2 guided`) |
+| [docs/kvl_beamsearch.md](docs/kvl_beamsearch.md) | KVL-scored beam (`phase2 kvl_beam`) |
 
 ## Testing
 

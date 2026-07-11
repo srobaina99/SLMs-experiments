@@ -1,15 +1,15 @@
-# Top-K A1-Guided Decoding (Design)
+# Top-K A1-Guided Decoding
 
-**Status:** Planned — not yet implemented in code.
+**Status:** Implemented — `phase2 guided` via `GuidedSweepRunner` (`phase2/guided.py`), `generate_guided()` / `ConstrainedDecoder` under `models/`.
 
-Design for a fourth inference-time intervention: **top-k A1-constrained greedy decoding**. At each decoding step, inspect the model's top-K token candidates; if any map to the A1 vocabulary, pick the highest-probability one; otherwise take argmax.
+Fourth inference-time intervention: **top-k A1-constrained greedy decoding**. At each decoding step, inspect the model's top-K token candidates; if any map to the A1 vocabulary, pick the highest-probability one; otherwise take argmax.
 
-This is **not** best-of-N reranking (current `BeamSearchGenerator`) and **not** logit bias. It is step-wise lexical steering with a safe fallback.
+This is **not** best-of-N reranking (deprecated `BeamSearchGenerator`) and **not** logit bias. It is step-wise lexical steering with a safe fallback.
 
-**Suggested CLI name:** `phase2 guided`  
+**CLI:** `phase2 guided`  
 **Accurate label:** *top-k A1-constrained greedy decoding*
 
-See also: [interventions.md](interventions.md) (existing interventions), [metrics.md](metrics.md) (A1 pass criteria).
+See also: [interventions.md](interventions.md), [metrics.md](metrics.md) (readability proxy), [guided-decoding-flow.html](guided-decoding-flow.html) (visual walkthrough; `top_k` → `guided_top_k`, no `top_p`).
 
 ---
 
@@ -18,8 +18,8 @@ See also: [interventions.md](interventions.md) (existing interventions), [metric
 | Approach | When it acts | Effect |
 |----------|--------------|--------|
 | **Logit bias** (Phase 1 weighting) | Every step, soft | Nudges A1 tokens; hard words can still win if the model is very confident |
-| **Best-of-N + A1 rerank** (`phase2 beam`) | After full answer | Picks the sample that looks most A1-like post hoc |
-| **Guided decoding** (this design) | Every step, hard-ish | Only switches away from argmax when an A1 token is already in the top-K pool |
+| **Best-of-N + A1 rerank** (`phase2 beam`, deprecated) | After full answer | Void at temperature 0 — identical greedy paths |
+| **Guided decoding** (this intervention) | Every step, hard-ish | Only switches away from argmax when an A1 token is already in the top-K pool |
 
 Guided decoding sits between logit bias and best-of-N: it shapes the whole answer as it is generated, but only when simple vocabulary is already a plausible next step.
 
@@ -35,18 +35,38 @@ CLI: phase2 guided
         → A1TokenIndex (per model, cached)
         → ConstrainedDecoder.decode()   # token-by-token loop
     → ExperimentPipeline.run_guided()
-    → RunStore → summary.json (by_guided_top_k)
+    → RunStore → summary.json (by_guided_top_k + by_model)
 ```
 
 ### One observation
 
-1. `GuidedSweepRunner` loads each model once per model batch (same pattern as `BeamSweepRunner`).
-2. For each `(config, prompt)`: `pipeline.run_guided()` → `generate_guided()` → constrained decode → format → evaluate → `meets_a1_criteria`.
+1. `GuidedSweepRunner` loads each model once per model batch.
+2. For each `(config, prompt)`: `pipeline.run_guided()` → `generate_guided()` → constrained decode → format → evaluate → `meets_a1_criteria` (readability proxy).
 3. Results land in the usual run bundle (`full.csv`, `specification.csv`, `summary.json`).
+
+### CLI examples
+
+```bash
+python -m slm_experiments phase2 guided
+python -m slm_experiments phase2 guided --top-k-pools 0,5,10,20 --prompts all
+python -m slm_experiments phase2 guided --mode trie --models Qwen3 --prompts all
+```
+
+Defaults: `temperature=0.0`, `top_k=50`, prompting ON (zero-shot), weighting OFF. Pool grid default `0,5,10,20` (`0` = unconstrained in-run baseline). `top_p` is not used.
 
 ---
 
-## Proposed file layout
+## Implementation notes (design archive)
+
+The sections below retain the original design narrative (file layout, decoder API, risks). Prefer the live modules as source of truth when they diverge:
+
+| Live module | Role |
+|-------------|------|
+| `models/a1_token_index.py` | Mid-sentence + sentence-start A1 IDs; optional trie |
+| `models/constrained_decoder.py` | Pool → A1 preference → argmax fallback |
+| `models/llamacpp.py` | `generate_guided()` |
+| `phase2/guided.py` | Sweep factory / runner |
+| `core/pipeline.py` | `run_guided()` |
 
 ```
 src/slm_experiments/
@@ -74,25 +94,25 @@ The experiment runner (`phase2/guided.py`) stays thin — same role as `phase2/b
 
 ## Phase 2 sweep design
 
-Default grid sweeps **pool size** (how many top logits are considered before the A1 filter):
+Default grid sweeps **pool size** (how many top logits are considered before the A1 filter). Pool `0` is an in-run unconstrained baseline (same carrier, guided OFF → plain greedy):
 
 | Setting | Default | Notes |
 |---------|---------|-------|
 | `config_weighting` | `False` | Isolates guided decoding from logit bias |
-| `config_prompting` | `True` (zero-shot) | Same baseline as beam sweep |
-| `config_guided` | `True` | New flag |
-| `guided_top_k` | `5, 10, 20` | Swept hyperparameter |
+| `config_prompting` | `True` (zero-shot) | Fixed carrier |
+| `config_guided` | `False` at pool 0; else `True` | Baseline vs intervention |
+| `guided_top_k` | `0, 5, 10, 20` | Swept; `0` = unconstrained baseline |
 | `guided_mode` | `"flat"` | `"flat"` or `"trie"` (see below) |
 | `temperature` | `0.0` | Greedy + guided override |
 | Weighting / beam | OFF | Do not combine in first sweep |
 
-**Config naming:** `{model}_guided_k{10}` (parseable like beam's `_beam_w(\d+)`).
+**Config naming:** `{model}_guided_k{10}` (parseable like beam's `_beam_w(\d+)`). Baseline: `{model}_guided_k0`.
 
-**CLI examples (planned):**
+**CLI examples:**
 
 ```bash
 python -m slm_experiments phase2 guided
-python -m slm_experiments phase2 guided --top-k-pools 5,10,20 --prompts all
+python -m slm_experiments phase2 guided --top-k-pools 0,5,10,20 --prompts all
 python -m slm_experiments phase2 guided --mode trie --models Qwen3
 ```
 
@@ -106,7 +126,7 @@ Use `--prompts all` (25 prompts) for publishable claims; default n=3 remains for
 
 Mirrors `phase2/beam.py`:
 
-- `DEFAULT_TOP_K_POOL_GRID = [5, 10, 20]`
+- `DEFAULT_TOP_K_POOL_GRID = [0, 5, 10, 20]`
 - `parse_top_k_pools(arg) -> list[int]`
 - `create_guided_configs(pools) -> list[ExperimentConfig]`
 - `guided_top_k_from_config(config) -> int`
@@ -140,7 +160,7 @@ class A1TokenIndex:
 3. Record collisions where one token ID maps to multiple A1 words.
 4. If `use_trie`: store full token ID sequences per word per context.
 
-**Refactor:** `_create_logit_bias()` in `llamacpp.py` should call the same builder so weighting and guided decoding share one tokenization path.
+**Refactor:** `_create_logit_bias()` in `llamacpp.py` calls the same builder and biases the union of `mid_sentence_ids | sentence_start_ids` so weighting and guided decoding share one tokenization path.
 
 ### `models/constrained_decoder.py` — step-wise decode loop
 

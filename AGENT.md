@@ -2,7 +2,8 @@
 
 ## 1. Mission
 
-Evaluate whether inference-time interventions make 4 SLMs produce CEFR A1 English.
+Evaluate whether inference-time interventions make 4 SLMs produce simpler English answers for beginner learners.
+Primary binary outcome is an **automated readability proxy** (`meets_a1_criteria`), not a CEFR proficiency test.
 Two research phases, one shared pipeline, run-centric results.
 
 ## 2. Documentation Map
@@ -11,23 +12,29 @@ Two research phases, one shared pipeline, run-centric results.
 |----------|---------|-----------|
 | **AGENT.md** (this file) | Structure, CLI, code rules | Always start here |
 | [ExperimentDesign.md](ExperimentDesign.md) | Formal experiment spec, phases, success criteria | Designing or changing experiments |
-| [docs/metrics.md](docs/metrics.md) | Readability metrics, A1 thresholds | Working on `evaluation/` |
+| [docs/metrics.md](docs/metrics.md) | Readability metrics, proxy thresholds | Working on `evaluation/` |
 | [docs/models.md](docs/models.md) | GGUF files, templates, GPU setup | Adding/fixing model wrappers |
-| [docs/interventions.md](docs/interventions.md) | Weighting, prompting, beam mechanics | Changing intervention logic |
-| [docs/guided-decoding.md](docs/guided-decoding.md) | Top-k A1-guided decoding (design, not yet implemented) | Implementing guided decode / `phase2 guided` |
+| [docs/interventions.md](docs/interventions.md) | Weighting, prompting, guided, KVL, deprecated beam | Changing intervention logic |
+| [docs/guided-decoding.md](docs/guided-decoding.md) | Top-k A1-guided decoding (`phase2 guided`) | Changing guided decode |
+| [docs/kvl_beamsearch.md](docs/kvl_beamsearch.md) | KVL-scored beam (`phase2 kvl_beam`) | Changing KVL beam |
 | [docs/clusteruy.md](docs/clusteruy.md) | ClusterUY SSH, Singularity, Phase 2 batch jobs | Running experiments on the cluster |
+| [docs/experiment-setup-recommendations.md](docs/experiment-setup-recommendations.md) | Thesis-defensibility checklist | Before publishing claims |
 | [README.md](README.md) | Human setup quickstart | Environment issues |
 
 ## 3. Research Phases
 
 → Full design in [ExperimentDesign.md](ExperimentDesign.md)
 
-**Phase 1 — Factorial:** 4 models × 4 interventions × N prompts (default 3, `--prompts all` for 25)
+**Phase 1 — Factorial:** 4 models × 4 interventions × N prompts (default 3 smoke; `--prompts all` for 25 formal)
 
 **Phase 2 — Hyperparameter sweeps (all 4 models):**
 - `weights` — logit bias grid with prompting ON
-- `beam` — beam width sweep with A1-ratio selection
 - `prompting` — zero/one/few-shot contextual prompting
+- `guided` — A1-constrained greedy top-k pool sweep
+- `kvl_beam` — KVL-scored beam width sweep
+- `beam` — **deprecated / hard-fails** (void at temperature 0)
+
+Shared generation defaults: `temperature=0.0`, `top_k=50`, max 200 new tokens; **no `top_p`**.
 
 ## 4. Directory Map
 
@@ -42,15 +49,16 @@ SLMs-experiments/
 ├── pytest.ini
 ├── docs/                     # Detailed reference docs
 ├── data/vocabularies/        # A1 vocabulary (487 words)
+├── data/kvl/                 # KVL lookup tables (es/de/cn)
 ├── models/gguf/              # GGUF model files (not in git)
 ├── results/runs/{run_id}/    # Run bundles (manifest, CSVs, summary, plots)
 ├── src/slm_experiments/      # Package source
 │   ├── cli.py                # Single CLI entry point
 │   ├── core/                 # Pipeline, config, result, run_store, prompts
-│   ├── models/               # Base, llamacpp, beam, per-model wrappers
+│   ├── models/               # Base, llamacpp, guided/KVL decoders, wrappers
 │   ├── evaluation/           # Metrics and response formatter
 │   ├── phase1/               # Factorial experiment
-│   ├── phase2/               # Weight, beam, prompting sweeps
+│   ├── phase2/               # Weight, prompting, guided, kvl_beam (+ deprecated beam)
 │   ├── human/                # Export/import for human review
 │   └── plot.py               # Boxplot generation from run bundles
 └── tests/                    # pytest suite (mocked pipeline)
@@ -68,8 +76,9 @@ python -m slm_experiments phase1 [--prompts N|all] [--models all|Qwen3,...] [--s
 
 # Phase 2
 python -m slm_experiments phase2 weights   [--weights 1.0,1.5,2.0,4.0] [--prompts N|all] [--models all]
-python -m slm_experiments phase2 beam      [--widths 4,8,10]           [--prompts N|all] [--models all]
 python -m slm_experiments phase2 prompting [--shots 0,1,3]              [--prompts N|all] [--models all]
+python -m slm_experiments phase2 guided    [--top-k-pools 5,10,20]      [--prompts N|all] [--models all]
+python -m slm_experiments phase2 kvl_beam  [--widths 4,8]               [--prompts N|all] [--models all]
 
 # Post-run
 python -m slm_experiments plot --run-id <id>
@@ -81,7 +90,7 @@ python -m slm_experiments human export --run-id <id> [--sample 60]
 python -m slm_experiments human import --run-id <id> --tags <csv>
 ```
 
-Auto-plot after each run by default; `--no-plot` to skip.
+Auto-plot after each run by default; `--no-plot` to skip. Formal claims: always `--prompts all`.
 
 ## 6. Results Contract
 
@@ -91,14 +100,14 @@ Every run → `results/runs/{run_id}/`:
 |----------|----------|
 | `manifest.json` | Run metadata, CLI args, observation counts |
 | `specification.csv` | Reduced columns, European decimals (paper-compatible) |
-| `full.csv` | All fields including beam metadata |
-| `summary.json` | Aggregated stats (overall + by_config; Phase 2 adds by_weight_factor / by_beam_width / by_num_shots) |
+| `full.csv` | All fields including guided / KVL metadata |
+| `summary.json` | Aggregates: overall, by_config, sweep sections, **by_model** |
 | `plots/` | Boxplots (after `plot --run-id`) |
 | `human_review.csv` | After human export/import |
 
 Run ID: `{YYYYMMDD_HHMMSS}_{phase}_{experiment}`
 
-Failed generations are recorded but excluded from metric aggregates in `summary.json`.
+Failed generations are recorded but excluded from metric aggregates in `summary.json`. Thesis tables: stratify by model first.
 
 ## 7. Code Architecture
 
@@ -128,11 +137,13 @@ CLI → Phase runner → Pipeline (generate → format → evaluate → record) 
 
 → Details in [docs/interventions.md](docs/interventions.md)
 
-| Intervention | Mechanism | Phase 1 config flags |
-|--------------|-----------|---------------------|
-| Weighting | Logit bias on A1 vocabulary tokens | `config_weighting=True`, `weight_factor=1.5` |
-| Prompting | System/context block for simplification | `config_prompting=True` |
-| Beam | Generate N candidates, select highest A1 ratio | Phase 2 only |
+| Intervention | Mechanism | Where |
+|--------------|-----------|-------|
+| Weighting | Logit bias on A1 vocabulary tokens (mid ∪ start IDs) | Phase 1 + Phase 2 weights |
+| Prompting | System/context block for simplification | Phase 1 + Phase 2 prompting |
+| Guided | Top-k A1-constrained greedy | Phase 2 guided |
+| KVL beam | Token-level beam ranked by KVL/GLMM; **first-finish** stop (avoids max-length pad) | Phase 2 kvl_beam |
+| Beam (deprecated) | Best-of-N + A1 ratio — hard-fails at CLI | Excluded |
 
 ## 10. Human Evaluation
 
@@ -141,7 +152,7 @@ python -m slm_experiments human export --run-id <id> [--sample 60]
 python -m slm_experiments human import --run-id <id> --tags <csv>
 ```
 
-Export samples rows from `specification.csv` into `human_review.csv`. Import merges reviewer tags back into the run bundle.
+Export samples rows from `specification.csv` into `human_review.csv`. Import merges reviewer tags back into the run bundle. Use for agreement with the readability proxy.
 
 ## 11. Plotting
 
@@ -168,6 +179,7 @@ No GGUF required for most tests (mocked pipeline).
 - SMOG metric
 - Edit `SLMs-master-thesis/paper/`
 - Duplicate ExperimentDesign content into AGENT.md — link instead
+- Cite deprecated `phase2 beam` runs in thesis claims
 
 ## 14. Relationship to Thesis Repo
 
