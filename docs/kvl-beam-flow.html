@@ -441,12 +441,13 @@
 <body>
 
   <header class="hero">
-    <span class="status-badge">Proposed — not yet implemented</span>
+    <span class="status-badge">Implemented — phase2 kvl_beam</span>
     <h1>KVL-Scored Real Beam Search</h1>
     <p class="subtitle">
       Token-by-token beam search that ranks partial hypotheses by learner vocabulary difficulty
       (KVL/GLMM scores) instead of post-hoc A1-ratio reranking over independent samples.
-      Designed for CEFR A1 English evaluation in <code>SLMs-experiments</code>.
+      Used as a readability / vocabulary intervention in <code>SLMs-experiments</code>
+      (primary binary outcome is an automated readability proxy, not a CEFR proficiency test).
     </p>
   </header>
 
@@ -454,38 +455,42 @@
 
     <!-- 1. Intro -->
     <section id="intro">
-      <h2>Current vs Proposed</h2>
+      <h2>Deprecated best-of-N vs live KVL beam</h2>
       <p>
-        The project evaluates small language models on whether they produce A1-appropriate English
-        for learners. Today’s <code>phase2 beam</code> command uses
+        The project evaluates small language models on whether interventions produce simpler English
+        for beginner learners. The old <code>phase2 beam</code> command used
         <code>BeamSearchGenerator</code> in <code>src/slm_experiments/models/beam.py</code> — but
-        despite the name, it is <em>not</em> real beam search. It draws <strong>N independent
-        full-length samples</strong> (best-of-N), then reranks finished answers by A1 vocabulary
-        ratio or cumulative log probability.
+        despite the name, it is <em>not</em> real beam search. It drew <strong>N independent
+        full-length samples</strong> (best-of-N), then reranked finished answers by A1 vocabulary
+        ratio. At <code>temperature=0.0</code> that path is <strong>deprecated and hard-fails</strong>
+        in the CLI.
       </p>
       <p>
-        The proposed <strong>KVL beam decoder</strong> performs genuine beam search: at each token
-        step it expands the top-<em>k</em> logits for each active hypothesis, keeps the best
-        <em>W</em> partial sequences ranked by a running mean GLMM score from
-        <code>KvlLookup</code>, and only evaluates KVL when a content word completes at a word
-        boundary. This mirrors the manual llama.cpp eval loop planned for guided decoding in
+        The live <strong>KVL beam decoder</strong> (<code>phase2 kvl_beam</code>) performs genuine
+        beam search: at each token step it expands the top-<em>k</em> logits for each active
+        hypothesis, keeps the best <em>W</em> partial sequences ranked by a running mean GLMM score
+        from <code>KvlLookup</code>, and only evaluates KVL when a content word completes at a word
+        boundary. This mirrors the manual llama.cpp eval loop used by guided decoding in
         <code>docs/guided-decoding.md</code>, but optimizes for continuous difficulty scores rather
-        than a binary A1 token filter.
+        than a binary A1 token filter. <strong>Stopping (intentional first-finish):</strong>
+        returns the first finished non-empty candidate so answers can complete
+        naturally — mean KVL does not reward EOS, so max-KVL-at-length would pad to
+        <code>max_new_tokens</code> (see <code>docs/kvl_beamsearch.md</code>).
       </p>
 
       <div class="compare-cards">
         <div class="card current">
-          <span class="tag amber">Current — phase2 beam</span>
+          <span class="tag amber">Deprecated — phase2 beam</span>
           <h4>Best-of-N + post-hoc rerank</h4>
           <ul>
             <li>Generate N complete answers independently</li>
             <li>Score finished text with A1-ratio or logprob</li>
             <li>No interaction between samples during decoding</li>
-            <li>One-shot <code>llm(prompt, max_tokens=…)</code> per sample</li>
+            <li>Void at temperature 0 — CLI hard-fails</li>
           </ul>
         </div>
         <div class="card proposed">
-          <span class="tag blue">Proposed — KVL beam</span>
+          <span class="tag blue">Live — KVL beam</span>
           <h4>Token-by-token beam search</h4>
           <ul>
             <li>Maintain W partial hypotheses in parallel</li>
@@ -886,15 +891,15 @@
               <td>A1-ratio or logprob on finished text</td>
               <td>N independent samples, pick best</td>
               <td><span class="no">No</span></td>
-              <td>Implemented</td>
+              <td>Deprecated (hard-fails)</td>
             </tr>
             <tr>
-              <td><strong>KVL beam</strong><br><code>phase2 kvl-beam</code></td>
+              <td><strong>KVL beam</strong><br><code>phase2 kvl_beam</code></td>
               <td>Every token step</td>
               <td>Running mean GLMM (KVL lookup)</td>
-              <td>Real beam search, width W</td>
+              <td>Real beam search, width W (first-finish)</td>
               <td><span class="yes">Yes</span></td>
-              <td>Proposed</td>
+              <td>Implemented</td>
             </tr>
             <tr>
               <td><strong>Guided decoding</strong><br><code>phase2 guided</code></td>
@@ -902,7 +907,7 @@
               <td>Binary A1 token filter in top-K pool</td>
               <td>Greedy + A1 override</td>
               <td><span class="yes">Yes</span></td>
-              <td>Planned</td>
+              <td>Implemented</td>
             </tr>
             <tr>
               <td><strong>Logit bias</strong><br><code>phase1 weighting</code></td>

@@ -1,15 +1,21 @@
-# KVL Beam Search (Design)
+# KVL Beam Search
 
-**Status:** Planned — not yet implemented in code.
+**Status:** Implemented — `phase2 kvl_beam` via `KvlBeamSweepRunner` (`phase2/kvl_beam.py`), `generate_kvl_beam()` / `KvlBeamDecoder` under `models/`.
 
-Design for a fifth inference-time intervention: **token-level beam search ranked by KVL/GLMM learner vocabulary scores** instead of model likelihood. At each decoding step, expand multiple partial sequences using the model's top logits, accumulate KVL scores as words complete, and prune to the best-scoring beams.
+Fifth inference-time intervention: **token-level beam search ranked by KVL/GLMM learner vocabulary scores** instead of model likelihood. At each decoding step, expand multiple partial sequences using the model's top logits, accumulate KVL scores as words complete, and prune to the best-scoring beams.
 
-This is **not** the current `BeamSearchGenerator` (best-of-N + A1-ratio reranking). It is **not** logit bias or guided decoding. It is genuine multi-path search with a custom, learner-grounded objective.
+This is **not** the deprecated `BeamSearchGenerator` (best-of-N + A1-ratio reranking). It is **not** logit bias or guided decoding. It is genuine multi-path search with a custom, learner-grounded objective.
 
-**Suggested CLI name:** `phase2 kvl_beam`  
+**CLI:** `phase2 kvl_beam`  
 **Accurate label:** *KVL-scored beam search* or *learner-vocabulary beam decoding*
 
-See also: [interventions.md](interventions.md) (existing interventions), [metrics.md](metrics.md) (KVL evaluation), [guided-decoding.md](guided-decoding.md) (shared decode-loop infrastructure), [data/kvl/README.md](../data/kvl/README.md) (lookup provenance).
+**Important — first-finish stopping (intentional):** The decode loop returns the **first** candidate that hits a stop condition with non-empty text (in beam expansion order), not the best KVL-ranked finished hypothesis at the end.
+
+**Why.** Mean KVL over content words does not reward finishing a sentence. If selection waited until `max_tokens` and then took `max(..., key=KVL)`, the “best” hypothesis almost always stretched to the length budget — often incoherent padding — because continuing can keep the running mean competitive while never stopping. First-finish lets a naturally completed answer win. KVL still ranks which **partial** beams survive each prune; first-finish only decides **when** to return.
+
+Empty EOS-only finishes are skipped. If nothing finishes before `max_tokens`, the best surviving active beam is returned. Do **not** interpret width 4 vs 8 as “better final KVL selection among finished hyps”; treat width as more exploration before the first natural stop. Prefer KVL columns in `full.csv` / `summary.json` as primary endpoints for this arm.
+
+See also: [interventions.md](interventions.md), [metrics.md](metrics.md) (KVL evaluation), [guided-decoding.md](guided-decoding.md), [data/kvl/README.md](../data/kvl/README.md).
 
 ---
 
@@ -17,13 +23,13 @@ See also: [interventions.md](interventions.md) (existing interventions), [metric
 
 | Approach | When KVL acts | Search strategy |
 |----------|---------------|-----------------|
-| **KVL metrics only** (current) | After generation | No steering — records `kvl_mean_score` on final text |
-| **Best-of-N + A1 rerank** (`phase2 beam`) | After full answer | N independent samples; pick highest A1 ratio |
+| **KVL metrics only** | After generation | No steering — records `kvl_mean_score` on final text |
+| **Best-of-N + A1 rerank** (`phase2 beam`, deprecated) | After full answer | Void at temperature 0 |
 | **Logit bias** | Every step, soft | Single path; nudges internal 487-word A1 list |
-| **Guided decoding** (planned) | Every step, greedy-ish | Single path; pick easy token if in top-K pool |
-| **KVL beam search** (this design) | During generation | Multiple paths; prune by running KVL aggregate |
+| **Guided decoding** | Every step, greedy-ish | Single path; pick easy token if in top-K pool |
+| **KVL beam search** (this intervention) | During generation | Multiple paths; prune by running KVL aggregate; **first-finish return** |
 
-**Research question:** If we steer decoding toward vocabulary that Spanish L1 learners are likely to know (per `kvl_lookup_es.json`), does that improve readability (`meets_a1_criteria`) more than post-hoc reranking or step-wise A1 filtering?
+**Research question:** If we steer decoding toward vocabulary that Spanish L1 learners are likely to know (per `kvl_lookup_es.json`), does that improve the readability proxy (`meets_a1_criteria`) and/or post-hoc KVL metrics more than post-hoc reranking or step-wise A1 filtering?
 
 KVL beam sits between best-of-N and guided decoding: it explores several futures at once, but ranks them by **external learner knowledge** rather than model probability or the internal A1 starter list.
 
@@ -40,14 +46,24 @@ CLI: phase2 kvl_beam
         → KvlTokenIndex (per model, cached)
         → KvlBeamDecoder.decode()   # token-by-token beam loop
     → ExperimentPipeline.run_kvl_beam()
-    → RunStore → summary.json (by_kvl_beam_width)
+    → RunStore → summary.json (by_kvl_beam_width + by_model)
 ```
 
 ### One observation
 
-1. `KvlBeamSweepRunner` loads each model once per model batch (same pattern as `BeamSweepRunner`).
-2. For each `(config, prompt)`: format prompt → run KVL beam decode → extract/clean response → evaluate readability + KVL metrics → record `meets_a1_criteria`.
+1. `KvlBeamSweepRunner` loads each model once per model batch.
+2. For each `(config, prompt)`: format prompt → run KVL beam decode → extract/clean response → evaluate readability + KVL metrics → record `meets_a1_criteria` (proxy).
 3. Beam metadata (width, branch factor, running KVL stats, model logprob tie-break) lands in `full.csv`.
+
+### CLI examples
+
+```bash
+python -m slm_experiments phase2 kvl_beam
+python -m slm_experiments phase2 kvl_beam --widths 1,4,6,8 --prompts all
+python -m slm_experiments phase2 kvl_beam --kvl-l1 es --branch-factor 10 --models Qwen3
+```
+
+Defaults: `temperature=0.0`, `top_k=50` before branch selection, prompting ON, weighting OFF, `kvl_l1=es`. Default width grid `1,4,6,8` (`1` = greedy in-run baseline). Claims for other L1s require separate sweeps (`de` / `cn`).
 
 ---
 
@@ -200,7 +216,17 @@ keep top beam_width candidates by kvl_mean (+ logprob tie-break)
 
 **Recommendation:** **Constrained expansion within model top-K/top-P**, then **logprob tie-breaker**. Never use logprob as primary rank — that recreates standard beam with KVL as noise.
 
-### H. L1 selection
+### H. Stopping / final selection — first-finish vs best finished KVL
+
+| Option | Behavior | Pros | Cons |
+|--------|----------|------|------|
+| **First-finish (current)** | Return first non-empty stop in expansion order | Completed sentences can win; avoids max-length pad | Width ≠ “better final KVL pick” |
+| **Collect finished → max KVL** | Keep going; return best finished (or max-length survivor) | Classic beam “select best hyp” story | Mean KVL does not reward EOS → stretches to `max_new_tokens`, often nonsense |
+| **First-finish + length/stop bonus in rank** | Soft preference for shorter / stopped hyps | Could combine both | Extra hyperparameters; not needed if first-finish is policy |
+
+**Recommendation (adopted):** **First-finish.** Mean KVL is a good prune signal for *which* partials to keep, but a poor signal for *when* to stop. Returning on the first natural completion is the length/stop prior that the objective itself lacks. Document claim limits: width sweeps measure exploration before first stop.
+
+### I. L1 selection
 
 | Option | Source |
 |--------|--------|
@@ -210,7 +236,7 @@ keep top beam_width candidates by kvl_mean (+ logprob tie-break)
 
 **Recommendation:** Use **`ExperimentConfig.kvl_l1`** (default `es`); load `data/kvl/kvl_lookup_{l1}.json` via existing `KvlLookup`.
 
-### I. Interaction with other interventions
+### J. Interaction with other interventions
 
 | Combination | First sweep? |
 |-------------|--------------|
@@ -336,30 +362,30 @@ tests/
 
 ## Phase 2 sweep design
 
-Default grid sweeps **beam width** (branch factor fixed initially):
+Default grid sweeps **beam width** (branch factor fixed initially). Width `1` is an in-run greedy baseline (same carrier, KVL beam OFF → plain greedy, not a one-wide KVL beam):
 
 | Setting | Default | Notes |
 |---------|---------|-------|
-| `config_kvl_beam` | `True` | New flag |
-| `kvl_beam_width` | `4, 8` | Swept hyperparameter (start smaller than A1 beam — slower) |
+| `config_kvl_beam` | `False` at width 1; else `True` | Baseline vs intervention |
+| `kvl_beam_width` | `1, 4, 6, 8` | Swept; `1` = greedy baseline |
 | `kvl_branch_factor` | `10` | Fixed in v1 |
 | `kvl_l1` | `es` | Uses `kvl_lookup_es.json` |
-| `config_prompting` | `True` (zero-shot) | Same baseline as A1 beam sweep |
+| `config_prompting` | `True` (zero-shot) | Fixed carrier |
 | `config_weighting` | `False` | No logit bias |
 | `temperature` | `0.0` | Deterministic expansion |
 | A1 beam / guided / weighting | OFF | Isolated intervention |
 
-**Config naming:** `{model}_kvl_beam_w4` (parseable like `_beam_w(\d+)`).
+**Config naming:** `{model}_kvl_beam_w4` (parseable like `_beam_w(\d+)`). Baseline: `{model}_kvl_beam_w1`.
 
-**CLI examples (planned):**
+**CLI examples:**
 
 ```bash
 python -m slm_experiments phase2 kvl_beam
-python -m slm_experiments phase2 kvl_beam --widths 4,8 --prompts all
+python -m slm_experiments phase2 kvl_beam --widths 1,4,6,8 --prompts all
 python -m slm_experiments phase2 kvl_beam --kvl-l1 es --branch-factor 10 --models Qwen3
 ```
 
-Use `--prompts all` (25 prompts) for publishable claims.
+Use `--prompts all` (25 prompts) for publishable claims. Report results **per model** (`summary.json` → `by_model`).
 
 ---
 

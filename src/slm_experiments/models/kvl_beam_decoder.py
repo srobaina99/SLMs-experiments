@@ -28,10 +28,25 @@ does not appear in the returned text. Stop strings are **not** tokenized into
 ``stop_token_ids`` (BPE splits like ``"<|im_end|>"`` would false-trigger on
 fragments such as token 91 ``"|"``).
 
+Stopping rule — **first-finish** (intentional design, not a bug)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 The decode loop returns the **first** candidate that hits a stop condition
-(token ID or string suffix), in beam expansion order, without comparing
-finished hypotheses at the end. If no candidate finishes before ``max_tokens``,
-the best surviving active beam is returned.
+(token ID or string suffix) **with non-empty text**, in beam expansion order,
+without collecting finished hypotheses and picking ``max(..., key=_rank_key)``.
+
+Why first-finish instead of “best KVL among finished / max-length survivors”:
+mean KVL over content words does **not** reward ending a sentence. Without an
+early return, the ranker keeps preferring partials that pad toward
+``max_tokens``, so the selected text often stretches to the length budget and
+becomes incoherent. First-finish lets a completed, naturally stopped answer
+win. KVL still steers **which** partials survive each prune step; first-finish
+only decides **when** to return. Empty token-ID stops (e.g. EOS detokenizing
+to ``""``) are skipped so models with high early EOS probability (TinyLlama)
+still beam through content branches. If nothing finishes before
+``max_tokens``, the best surviving active beam is returned.
+
+Claim note: width 4 vs 8 is “more exploration before first natural stop,”
+not “better final KVL selection among finished hypotheses.”
 
 Incremental eval (eval prompt once, then eval one token) is reserved for
 single-path greedy smoke tests only — beam branches require independent KV
@@ -160,6 +175,7 @@ class KvlBeamDecoder:
         ]
         candidates_pruned = 0
         steps_total = 0
+        best_survivor: KvlBeamCandidate | None = None
 
         for _ in range(max_tokens):
             if not active_beams:
@@ -183,27 +199,37 @@ class KvlBeamDecoder:
                         decode_suffix=decode_suffix,
                     )
                     if child.finished:
-                        return self._build_decode_result(
-                            child,
-                            prompt_token_ids,
-                            steps_total=steps_total,
-                            candidates_pruned=candidates_pruned,
-                        )
+                        # First non-empty finish wins (see module docstring).
+                        # Avoids max-length “best KVL” padding that never stops.
+                        if child.text.strip():
+                            return self._build_decode_result(
+                                child,
+                                prompt_token_ids,
+                                steps_total=steps_total,
+                                candidates_pruned=candidates_pruned,
+                            )
+                        continue
                     children.append(child)
 
             children.sort(key=self._rank_key, reverse=True)
             candidates_pruned += max(0, len(children) - self.beam_width)
             active_beams = children[: self.beam_width]
+            if active_beams:
+                best_survivor = max(active_beams, key=self._rank_key)
 
         for beam in active_beams:
             self._flush_candidate_words(beam)
 
         if not active_beams:
-            best = KvlBeamCandidate(
-                token_ids=list(prompt_token_ids),
-                text="",
-                cumulative_logprob=0.0,
-            )
+            if best_survivor is not None:
+                best = best_survivor
+                self._flush_candidate_words(best)
+            else:
+                best = KvlBeamCandidate(
+                    token_ids=list(prompt_token_ids),
+                    text="",
+                    cumulative_logprob=0.0,
+                )
         else:
             best = max(active_beams, key=self._rank_key)
 

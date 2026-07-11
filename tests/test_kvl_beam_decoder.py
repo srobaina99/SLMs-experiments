@@ -303,6 +303,11 @@ class TestKvlBeamDecoderStopTokens:
         assert TOK_STOP not in result.token_ids
 
     def test_returns_first_ending_candidate_not_best_kvl(self, fixture_lookup):
+        """First non-empty finish wins even if another open beam has easier KVL.
+
+        Design: without first-finish, max-KVL selection pads toward max_tokens
+        because mean KVL never rewards stopping. See module docstring.
+        """
         prompt = [100]
         prompt_len = len(prompt)
 
@@ -337,5 +342,40 @@ class TestKvlBeamDecoderStopTokens:
         )
 
         assert result.text == "fundamentally "
+        assert result.steps_total == 2
+        assert TOK_STOP not in result.token_ids
+
+    def test_skips_empty_token_stop_finish(self, fixture_lookup):
+        """TinyLlama-style early EOS (empty after rollback) must not halt decode."""
+        prompt = [100]
+        prompt_len = len(prompt)
+
+        eval_fn = make_eval_fn(
+            prompt_len,
+            {
+                (): {
+                    TOK_FRIEND: 6.0,
+                    TOK_STOP: 4.0,
+                },
+            },
+        )
+
+        decoder = KvlBeamDecoder(
+            kvl_lookup=fixture_lookup,
+            l1="es",
+            text_evaluator=TextEvaluator(),
+            beam_width=1,
+            branch_factor=3,
+        )
+
+        result = decoder.decode(
+            eval_fn,
+            prompt,
+            max_tokens=10,
+            stop=[],
+            stop_token_ids=frozenset({TOK_STOP}),
+        )
+
+        assert result.text == "friend "
         assert result.steps_total == 2
         assert TOK_STOP not in result.token_ids
