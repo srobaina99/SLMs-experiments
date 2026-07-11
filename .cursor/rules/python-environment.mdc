@@ -1,0 +1,26 @@
+---
+description: Use project venv Python; never Apple CLT python3
+alwaysApply: true
+---
+
+# Python environment
+
+Subagents and shell commands must **not** use bare `python3` or `/usr/bin/python3`. On macOS that resolves to Apple's Command Line Tools Python 3.9, which can SIGABRT when Cursor spawns subprocesses.
+
+Always use the project virtualenv:
+
+```bash
+./venv/bin/python ...
+# or after activate:
+source venv/bin/activate
+python ...
+```
+
+If the venv is missing, create it with Homebrew Python (not Apple CLT):
+
+```bash
+/opt/homebrew/bin/python3 -m venv venv
+./venv/bin/pip install -e .
+```
+
+Fallback only when venv is unavailable: `/opt/homebrew/bin/python3`
