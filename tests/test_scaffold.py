@@ -10,7 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 class TestScaffold:
     def test_docs_exist(self):
         for doc in [
-            "AGENT.md",
+            "AGENTS.md",
             "README.md",
             "ExperimentDesign.md",
             "docs/metrics.md",

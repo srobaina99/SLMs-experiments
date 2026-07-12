@@ -1,4 +1,4 @@
-# AGENT.md
+# AGENTS.md
 
 ## 1. Mission
 
@@ -10,7 +10,7 @@ Two research phases, one shared pipeline, run-centric results.
 
 | Document | Purpose | Read when |
 |----------|---------|-----------|
-| **AGENT.md** (this file) | Structure, CLI, code rules | Always start here |
+| **AGENTS.md** (this file) | Structure, CLI, code rules | Always start here |
 | [ExperimentDesign.md](ExperimentDesign.md) | Formal experiment spec, phases, success criteria | Designing or changing experiments |
 | [docs/metrics.md](docs/metrics.md) | Readability metrics, proxy thresholds | Working on `evaluation/` |
 | [docs/models.md](docs/models.md) | GGUF files, templates, GPU setup | Adding/fixing model wrappers |
@@ -25,7 +25,7 @@ Two research phases, one shared pipeline, run-centric results.
 
 → Full design in [ExperimentDesign.md](ExperimentDesign.md)
 
-**Phase 1 — Factorial:** 4 models × 4 interventions × N prompts (default 3 smoke; `--prompts all` for 25 formal)
+**Thesis path = Phase 2 only.** Formal claims use `--prompts all` (25 prompts); CLI default `n=3` is a smoke-test guardrail. Phase 1 code remains but is optional / out of thesis scope.
 
 **Phase 2 — Hyperparameter sweeps (all 4 models):**
 - `weights` — logit bias grid with prompting ON
@@ -34,13 +34,15 @@ Two research phases, one shared pipeline, run-centric results.
 - `kvl_beam` — KVL-scored beam width sweep
 - `beam` — **deprecated / hard-fails** (void at temperature 0)
 
+**Phase 1 — Factorial (optional):** 4 models × 4 interventions × N prompts — not run/cited for the master thesis.
+
 Shared generation defaults: `temperature=0.0`, `top_k=50`, max 200 new tokens; **no `top_p`**.
 
 ## 4. Directory Map
 
 ```
 SLMs-experiments/
-├── AGENT.md                  # This file — agent entry point
+├── AGENTS.md                 # This file — agent entry point
 ├── README.md                 # Human quickstart
 ├── ExperimentDesign.md       # Formal experiment specification
 ├── scripts/clusteruy/        # SLURM batch scripts (smoke test + Phase 2 sweeps)
@@ -72,14 +74,14 @@ Always activate the virtualenv and run from the repo root (`pip install -e .` on
 ```bash
 source venv/bin/activate
 
-# Phase 1
-python -m slm_experiments phase1 [--prompts N|all] [--models all|Qwen3,...] [--seed 42] [--no-plot]
-
-# Phase 2
+# Phase 2 (thesis path)
 python -m slm_experiments phase2 weights   [--weights 1.0,1.5,2.0,4.0] [--prompts N|all] [--models all]
 python -m slm_experiments phase2 prompting [--shots 0,1,3]              [--prompts N|all] [--models all]
 python -m slm_experiments phase2 guided    [--top-k-pools 5,10,20]      [--prompts N|all] [--models all]
 python -m slm_experiments phase2 kvl_beam  [--widths 4,8]               [--prompts N|all] [--models all]
+
+# Phase 1 (optional / out of thesis scope)
+python -m slm_experiments phase1 [--prompts N|all] [--models all|Qwen3,...] [--seed 42] [--no-plot]
 
 # Post-run
 python -m slm_experiments plot --run-id <id>
@@ -91,7 +93,7 @@ python -m slm_experiments human export --run-id <id> [--sample 60]
 python -m slm_experiments human import --run-id <id> --tags <csv>
 ```
 
-Auto-plot after each run by default; `--no-plot` to skip. Formal claims: always `--prompts all`.
+Auto-plot after each run by default; `--no-plot` to skip. Formal thesis claims: always Phase 2 with `--prompts all`.
 
 ## 6. Results Contract
 
@@ -108,7 +110,9 @@ Every run → `results/runs/{run_id}/`:
 
 Run ID: `{YYYYMMDD_HHMMSS}_{phase}_{experiment}`
 
-Failed generations are recorded but excluded from metric aggregates in `summary.json`. Thesis tables: stratify by model first.
+Failed generations are recorded but excluded from metric means in `summary.json`. Rates (`a1_pass_rate`, `generation_failure_rate`, `hit_max_tokens_rate`) use all rows as denominator.
+
+**Thesis table cell recipe** (every reported cell): print `a1_pass_rate`, `generation_failure_rate`, `hit_max_tokens_rate`, then conditional means (readability / KVL as appropriate). Stratify by model first.
 
 ## 7. Code Architecture
 
@@ -179,7 +183,7 @@ No GGUF required for most tests (mocked pipeline).
 - Results outside `results/runs/{run_id}/`
 - SMOG metric
 - Edit `SLMs-master-thesis/paper/`
-- Duplicate ExperimentDesign content into AGENT.md — link instead
+- Duplicate ExperimentDesign content into AGENTS.md — link instead
 - Cite deprecated `phase2 beam` runs in thesis claims
 - Commit `data/cefr_sp/*.ckpt` (~1.2GB)
 

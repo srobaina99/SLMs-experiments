@@ -78,7 +78,7 @@ The **default is intentional**, not a bug: it prevents accidentally launching a 
 | Smoke / dev (default) | `phase1` or `--prompts 3` | 4 × 4 × 3 = **48** |
 | Formal / publishable claims | `--prompts all` | 4 × 4 × 25 = **400** |
 
-Documented in `ExperimentDesign.md` and `AGENT.md`. For any claim about intervention effect size, use `--prompts all`. Under `temperature=0.0`, prefer paired-by-prompt contrasts within model rather than multi-seed sampling replications.
+Documented in `ExperimentDesign.md` and `AGENTS.md`. For any claim about intervention effect size, use `--prompts all`. Under `temperature=0.0`, prefer paired-by-prompt contrasts within model rather than multi-seed sampling replications.
 
 ---
 
