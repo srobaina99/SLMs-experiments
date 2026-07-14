@@ -64,6 +64,28 @@ def _add_run_options(
         action="store_true",
         help="Skip automatic boxplot generation after the run",
     )
+    parser.add_argument(
+        "--enable-cefr-sp",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "CEFR-SP sentence difficulty scoring (default: on). "
+            "Use --no-enable-cefr-sp to disable. "
+            "Requires pip install -e '.[cefr-sp]' and downloaded ckpt."
+        ),
+    )
+    parser.add_argument(
+        "--cefr-sp-ckpt",
+        default="",
+        metavar="PATH",
+        help="Path to level_estimator.ckpt (default: data/cefr_sp/level_estimator.ckpt)",
+    )
+    parser.add_argument(
+        "--cefr-sp-device",
+        default="cpu",
+        metavar="DEVICE",
+        help="Torch device for CEFR-SP scoring (default: cpu)",
+    )
 
 
 def _normalize_argv(argv: list[str] | None) -> list[str] | None:
@@ -371,6 +393,9 @@ def main(argv: list[str] | None = None) -> None:
             seed=args.seed,
             no_plot=args.no_plot,
             cli_args=cli_args,
+            enable_cefr_sp=args.enable_cefr_sp,
+            cefr_sp_ckpt_path=args.cefr_sp_ckpt,
+            cefr_sp_device=args.cefr_sp_device,
         )
         print(f"Run complete: {run_id}")
         print(f"Output: {Path(out_dir).resolve()}")
@@ -390,6 +415,9 @@ def main(argv: list[str] | None = None) -> None:
                 seed=args.seed,
                 no_plot=args.no_plot,
                 cli_args=cli_args,
+                enable_cefr_sp=args.enable_cefr_sp,
+                cefr_sp_ckpt_path=args.cefr_sp_ckpt,
+                cefr_sp_device=args.cefr_sp_device,
             )
             print(f"Run complete: {run_id}")
             print(f"Output: {Path(out_dir).resolve()}")
@@ -406,6 +434,9 @@ def main(argv: list[str] | None = None) -> None:
                 seed=args.seed,
                 no_plot=args.no_plot,
                 cli_args=cli_args,
+                enable_cefr_sp=args.enable_cefr_sp,
+                cefr_sp_ckpt_path=args.cefr_sp_ckpt,
+                cefr_sp_device=args.cefr_sp_device,
             )
             print(f"Run complete: {run_id}")
             print(f"Output: {Path(out_dir).resolve()}")
@@ -432,6 +463,9 @@ def main(argv: list[str] | None = None) -> None:
                 no_plot=args.no_plot,
                 cli_args=cli_args,
                 mode=args.mode,
+                enable_cefr_sp=args.enable_cefr_sp,
+                cefr_sp_ckpt_path=args.cefr_sp_ckpt,
+                cefr_sp_device=args.cefr_sp_device,
             )
             print(f"Run complete: {run_id}")
             print(f"Output: {Path(out_dir).resolve()}")
@@ -450,6 +484,9 @@ def main(argv: list[str] | None = None) -> None:
                 seed=args.seed,
                 no_plot=args.no_plot,
                 cli_args=cli_args,
+                enable_cefr_sp=args.enable_cefr_sp,
+                cefr_sp_ckpt_path=args.cefr_sp_ckpt,
+                cefr_sp_device=args.cefr_sp_device,
             )
             print(f"Run complete: {run_id}")
             print(f"Output: {Path(out_dir).resolve()}")

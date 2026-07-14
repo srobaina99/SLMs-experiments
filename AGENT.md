@@ -3,7 +3,7 @@
 ## 1. Mission
 
 Evaluate whether inference-time interventions make 4 SLMs produce simpler English answers for beginner learners.
-Primary binary outcome is an **automated readability proxy** (`meets_a1_criteria`), not a CEFR proficiency test.
+Primary binary outcome is **CEFR-SP document level A1** (`meets_a1_criteria` when `cefr_sp_level == "A1"`). FK/Fog/Spache remain descriptive only.
 Two research phases, one shared pipeline, run-centric results.
 
 ## 2. Documentation Map
@@ -50,6 +50,7 @@ SLMs-experiments/
 ├── docs/                     # Detailed reference docs
 ├── data/vocabularies/        # A1 vocabulary (487 words)
 ├── data/kvl/                 # KVL lookup tables (es/de/cn)
+├── data/cefr_sp/             # CEFR-SP ckpt (download; not in git) + README
 ├── models/gguf/              # GGUF model files (not in git)
 ├── results/runs/{run_id}/    # Run bundles (manifest, CSVs, summary, plots)
 ├── src/slm_experiments/      # Package source
@@ -152,7 +153,7 @@ python -m slm_experiments human export --run-id <id> [--sample 60]
 python -m slm_experiments human import --run-id <id> --tags <csv>
 ```
 
-Export samples rows from `specification.csv` into `human_review.csv`. Import merges reviewer tags back into the run bundle. Use for agreement with the readability proxy.
+Export samples rows from `specification.csv` into `human_review.csv`. Import merges reviewer tags back into the run bundle. Use for agreement with the CEFR-SP A1 gate.
 
 ## 11. Plotting
 
@@ -173,13 +174,14 @@ No GGUF required for most tests (mocked pipeline).
 ## 13. Do NOT
 
 - Import from old thesis `Codigo/`
-- Add torch/transformers
+- Add torch/transformers to **core** deps (`requirements.txt`) — optional `[cefr-sp]` extras only
 - Multiple CLI scripts (one `cli.py`)
 - Results outside `results/runs/{run_id}/`
 - SMOG metric
 - Edit `SLMs-master-thesis/paper/`
 - Duplicate ExperimentDesign content into AGENT.md — link instead
 - Cite deprecated `phase2 beam` runs in thesis claims
+- Commit `data/cefr_sp/*.ckpt` (~1.2GB)
 
 ## 14. Relationship to Thesis Repo
 

@@ -10,6 +10,16 @@ readme = "README.md"
 requires-python = ">=3.9"
 dynamic = ["dependencies"]
 
+[project.optional-dependencies]
+# Optional CEFR-SP sentence scorer (Arase et al. Zenodo ckpt). Not required for core runs.
+# Target Lightning 2.x; if load_from_checkpoint fails, pin a 2.x release compatible with your torch.
+cefr-sp = [
+    "torch>=2.0.0",
+    "transformers>=4.36.0",
+    "pytorch-lightning>=2.0.0,<3",
+]
+dev = ["pytest>=7.0"]
+
 [tool.setuptools.dynamic]
 dependencies = { file = ["requirements.txt"] }
 

@@ -1,6 +1,6 @@
 # SLM Experiments
 
-Evaluate whether inference-time interventions make small language models (0.5B–3.8B) produce simpler English for beginner learners. Primary binary outcome is an automated readability proxy (`meets_a1_criteria`), not a CEFR proficiency test.
+Evaluate whether inference-time interventions make small language models (0.5B–3.8B) produce simpler English for beginner learners. Primary binary outcome is CEFR-SP document level A1 (`meets_a1_criteria` when `cefr_sp_level == "A1"`).
 
 ## Quick Start
 

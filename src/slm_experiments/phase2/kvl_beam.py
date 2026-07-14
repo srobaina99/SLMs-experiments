@@ -23,7 +23,7 @@ from typing import List, Optional, Tuple, Union
 
 from tqdm import tqdm
 
-from slm_experiments.core.config import ExperimentConfig
+from slm_experiments.core.config import ExperimentConfig, cefr_sp_config_kwargs
 from slm_experiments.core.pipeline import ExperimentPipeline
 from slm_experiments.core.prompts import MODEL_CONFIGS
 from slm_experiments.core.result import ExperimentResult
@@ -135,6 +135,9 @@ class KvlBeamSweepRunner:
         seed: int = 42,
         no_plot: bool = False,
         cli_args: Optional[List[str]] = None,
+        enable_cefr_sp: bool = True,
+        cefr_sp_ckpt_path: str = "",
+        cefr_sp_device: str = "cpu",
     ) -> Tuple[str, Path]:
         """
         Execute the KVL beam width sweep and write a run bundle.
@@ -145,6 +148,11 @@ class KvlBeamSweepRunner:
         width_list = parse_widths(widths)
         prompt_list = parse_prompts(prompts)
         model_list = parse_models(models)
+        cefr_sp_fields = cefr_sp_config_kwargs(
+            enable_cefr_sp=enable_cefr_sp,
+            cefr_sp_ckpt_path=cefr_sp_ckpt_path,
+            cefr_sp_device=cefr_sp_device,
+        )
 
         all_configs = create_kvl_beam_configs(
             width_list, branch_factor=branch_factor, kvl_l1=kvl_l1
@@ -176,7 +184,7 @@ class KvlBeamSweepRunner:
                     pbar.set_description(f"{model_name} {prompt_id}")
 
                     for base_config in model_configs:
-                        config = replace(base_config, prompt_id=prompt_id)
+                        config = replace(base_config, prompt_id=prompt_id, **cefr_sp_fields)
                         beam_width = kvl_beam_width_from_config(config)
                         pbar.set_postfix(width=beam_width, l1=kvl_l1)
 

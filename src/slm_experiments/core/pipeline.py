@@ -5,6 +5,12 @@ from typing import Any, Dict, Optional, Protocol, runtime_checkable
 from slm_experiments.core.config import ExperimentConfig
 from slm_experiments.core.result import ExperimentResult
 from slm_experiments.evaluation.a1_criteria import meets_a1_criteria
+from slm_experiments.evaluation.cefr_sp import (
+    CefrSpScorer,
+    SentenceScorer,
+    compute_cefr_sp_metrics,
+    empty_cefr_sp_metrics,
+)
 from slm_experiments.evaluation.formatter import ResponseFormatter
 from slm_experiments.evaluation.kvl import KvlLookup, compute_kvl_metrics, empty_kvl_metrics
 from slm_experiments.evaluation.metrics import TextEvaluator
@@ -66,10 +72,14 @@ class ExperimentPipeline:
         text_evaluator: Optional[TextEvaluator] = None,
         formatter: Optional[ResponseFormatter] = None,
         kvl_lookup: Optional[KvlLookup] = None,
+        cefr_sp_scorer: Optional[SentenceScorer] = None,
     ):
         self.text_evaluator = text_evaluator or TextEvaluator()
         self.formatter = formatter or ResponseFormatter()
         self.kvl_lookup = kvl_lookup or KvlLookup()
+        self.cefr_sp_scorer = cefr_sp_scorer
+        self._cefr_sp_scorer_cache: Optional[CefrSpScorer] = None
+        self._cefr_sp_scorer_cache_key: Optional[tuple[str, str]] = None
 
     def _compute_kvl_metrics(self, cleaned: str, l1: str) -> Dict[str, Any]:
         content_words = self.text_evaluator.extract_content_words(cleaned)
@@ -79,6 +89,51 @@ class ExperimentPipeline:
             content_words=content_words,
             kvl_lookup=self.kvl_lookup,
         )
+
+    def _resolve_cefr_sp_scorer(self, config: ExperimentConfig) -> Optional[SentenceScorer]:
+        if self.cefr_sp_scorer is not None:
+            return self.cefr_sp_scorer
+        if not config.enable_cefr_sp:
+            return None
+        ckpt_path = config.cefr_sp_ckpt_path or ""
+        device = config.cefr_sp_device or "cpu"
+        cache_key = (ckpt_path, device)
+        if (
+            self._cefr_sp_scorer_cache is None
+            or self._cefr_sp_scorer_cache_key != cache_key
+        ):
+            self._cefr_sp_scorer_cache = CefrSpScorer(
+                ckpt_path=ckpt_path or None,
+                device=device,
+            )
+            self._cefr_sp_scorer_cache_key = cache_key
+        return self._cefr_sp_scorer_cache
+
+    def _compute_cefr_sp_metrics(
+        self, cleaned: str, config: ExperimentConfig
+    ) -> Dict[str, Any]:
+        return compute_cefr_sp_metrics(
+            cleaned,
+            scorer=self._resolve_cefr_sp_scorer(config),
+            enabled=config.enable_cefr_sp,
+            ckpt_path=config.cefr_sp_ckpt_path,
+            device=config.cefr_sp_device,
+        )
+
+    def _empty_cefr_sp_metrics(self, config: ExperimentConfig) -> Dict[str, Any]:
+        return empty_cefr_sp_metrics(enabled=config.enable_cefr_sp)
+
+    def _success_text_and_a1(
+        self, cleaned: str, config: ExperimentConfig
+    ) -> tuple[Dict[str, Any], Dict[str, Any], bool]:
+        """Evaluate readability + CEFR-SP; gate A1 pass on CEFR-SP level."""
+        text_metrics = self.text_evaluator.evaluate_text_comprehensive(cleaned)
+        cefr_sp_metrics = self._compute_cefr_sp_metrics(cleaned, config)
+        meets_a1 = meets_a1_criteria(
+            generation_valid=True,
+            cefr_sp_metrics=cefr_sp_metrics,
+        )
+        return text_metrics, cefr_sp_metrics, meets_a1
 
     def run(
         self,
@@ -99,14 +154,8 @@ class ExperimentPipeline:
         is_successful = model_success and bool(cleaned.strip())
 
         if is_successful:
-            text_metrics = self.text_evaluator.evaluate_text_comprehensive(cleaned)
-            grade = text_metrics.get("grade_level_indices", {})
-            read = text_metrics.get("readability_scores", {})
-            meets_a1 = meets_a1_criteria(
-                grade.get("flesch_kincaid_grade", 0.0),
-                grade.get("gunning_fog", 0.0),
-                read.get("spache_readability", 0.0),
-                generation_valid=True,
+            text_metrics, cefr_sp_metrics, meets_a1 = self._success_text_and_a1(
+                cleaned, config
             )
             return ExperimentResult.create_from_response(
                 prompt=prompt,
@@ -119,6 +168,7 @@ class ExperimentPipeline:
                 generation_successful=True,
                 meets_a1_criteria=meets_a1,
                 kvl_metrics=self._compute_kvl_metrics(cleaned, config.kvl_l1),
+                cefr_sp_metrics=cefr_sp_metrics,
             )
 
         empty_metrics = self.text_evaluator.evaluate_text_comprehensive("")
@@ -133,6 +183,7 @@ class ExperimentPipeline:
             generation_successful=False,
             meets_a1_criteria=False,
             kvl_metrics=empty_kvl_metrics(config.kvl_l1),
+            cefr_sp_metrics=self._empty_cefr_sp_metrics(config),
         )
 
     def run_beam(
@@ -176,14 +227,8 @@ class ExperimentPipeline:
         }
 
         if is_successful:
-            text_metrics = self.text_evaluator.evaluate_text_comprehensive(cleaned)
-            grade = text_metrics.get("grade_level_indices", {})
-            read = text_metrics.get("readability_scores", {})
-            meets_a1 = meets_a1_criteria(
-                grade.get("flesch_kincaid_grade", 0.0),
-                grade.get("gunning_fog", 0.0),
-                read.get("spache_readability", 0.0),
-                generation_valid=True,
+            text_metrics, cefr_sp_metrics, meets_a1 = self._success_text_and_a1(
+                cleaned, config
             )
             return ExperimentResult.create_from_beam_response(
                 prompt=prompt,
@@ -196,6 +241,7 @@ class ExperimentPipeline:
                 generation_successful=True,
                 meets_a1_criteria=meets_a1,
                 kvl_metrics=self._compute_kvl_metrics(cleaned, config.kvl_l1),
+                cefr_sp_metrics=cefr_sp_metrics,
                 **beam_kwargs,
             )
 
@@ -211,6 +257,7 @@ class ExperimentPipeline:
             generation_successful=False,
             meets_a1_criteria=False,
             kvl_metrics=empty_kvl_metrics(config.kvl_l1),
+            cefr_sp_metrics=self._empty_cefr_sp_metrics(config),
             **beam_kwargs,
         )
 
@@ -245,14 +292,8 @@ class ExperimentPipeline:
         }
 
         if is_successful:
-            text_metrics = self.text_evaluator.evaluate_text_comprehensive(cleaned)
-            grade = text_metrics.get("grade_level_indices", {})
-            read = text_metrics.get("readability_scores", {})
-            meets_a1 = meets_a1_criteria(
-                grade.get("flesch_kincaid_grade", 0.0),
-                grade.get("gunning_fog", 0.0),
-                read.get("spache_readability", 0.0),
-                generation_valid=True,
+            text_metrics, cefr_sp_metrics, meets_a1 = self._success_text_and_a1(
+                cleaned, config
             )
             return ExperimentResult.create_from_guided_response(
                 prompt=prompt,
@@ -265,6 +306,7 @@ class ExperimentPipeline:
                 generation_successful=True,
                 meets_a1_criteria=meets_a1,
                 kvl_metrics=self._compute_kvl_metrics(cleaned, config.kvl_l1),
+                cefr_sp_metrics=cefr_sp_metrics,
                 **guided_kwargs,
             )
 
@@ -280,6 +322,7 @@ class ExperimentPipeline:
             generation_successful=False,
             meets_a1_criteria=False,
             kvl_metrics=empty_kvl_metrics(config.kvl_l1),
+            cefr_sp_metrics=self._empty_cefr_sp_metrics(config),
             **guided_kwargs,
         )
 
@@ -325,14 +368,8 @@ class ExperimentPipeline:
         }
 
         if is_successful:
-            text_metrics = self.text_evaluator.evaluate_text_comprehensive(cleaned)
-            grade = text_metrics.get("grade_level_indices", {})
-            read = text_metrics.get("readability_scores", {})
-            meets_a1 = meets_a1_criteria(
-                grade.get("flesch_kincaid_grade", 0.0),
-                grade.get("gunning_fog", 0.0),
-                read.get("spache_readability", 0.0),
-                generation_valid=True,
+            text_metrics, cefr_sp_metrics, meets_a1 = self._success_text_and_a1(
+                cleaned, config
             )
             return ExperimentResult.create_from_kvl_beam_response(
                 prompt=prompt,
@@ -345,6 +382,7 @@ class ExperimentPipeline:
                 generation_successful=True,
                 meets_a1_criteria=meets_a1,
                 kvl_metrics=self._compute_kvl_metrics(cleaned, config.kvl_l1),
+                cefr_sp_metrics=cefr_sp_metrics,
                 **kvl_beam_kwargs,
             )
 
@@ -360,5 +398,6 @@ class ExperimentPipeline:
             generation_successful=False,
             meets_a1_criteria=False,
             kvl_metrics=empty_kvl_metrics(config.kvl_l1),
+            cefr_sp_metrics=self._empty_cefr_sp_metrics(config),
             **kvl_beam_kwargs,
         )

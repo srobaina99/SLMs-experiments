@@ -159,7 +159,13 @@ class TestHumanImport:
         exporter = HumanExporter(results_root=tmp_path)
         out_path, _ = exporter.export(run_id, sample=4, seed=42)
 
-        review = pd.read_csv(out_path)
+        review = pd.read_csv(
+            out_path,
+            dtype={
+                "vocabulary_level": "string",
+                "notes": "string",
+            },
+        )
         review.loc[0, "response_appropriateness"] = 4.0
         review.loc[0, "vocabulary_level"] = "beginner"
         review.loc[0, "notes"] = "clear and simple"

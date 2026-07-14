@@ -36,6 +36,25 @@ class ExperimentConfig:
     kvl_beam_width: int = 4
     kvl_branch_factor: int = 10
 
+    # CEFR-SP secondary metric (default ON; requires [cefr-sp] extras + ckpt)
+    enable_cefr_sp: bool = True
+    cefr_sp_ckpt_path: str = ""
+    cefr_sp_device: str = "cpu"
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for storage."""
         return asdict(self)
+
+
+def cefr_sp_config_kwargs(
+    *,
+    enable_cefr_sp: bool = True,
+    cefr_sp_ckpt_path: str = "",
+    cefr_sp_device: str = "cpu",
+) -> Dict[str, Any]:
+    """Fields to pass into ``dataclasses.replace`` for CEFR-SP CLI options."""
+    return {
+        "enable_cefr_sp": bool(enable_cefr_sp),
+        "cefr_sp_ckpt_path": cefr_sp_ckpt_path or "",
+        "cefr_sp_device": cefr_sp_device or "cpu",
+    }

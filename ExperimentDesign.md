@@ -4,7 +4,7 @@ Formal specification for the SLM evaluation framework. Phase 1 establishes inter
 
 ## Context
 
-This project evaluates whether inference-time interventions make small language models (SLMs) produce simpler English answers for beginner learners. Prompts are themed around CEFR A1 topics; the primary binary outcome is an **automated readability proxy** (not a CEFR proficiency test). Four models are tested across interventions that aim to simplify vocabulary and sentence structure.
+This project evaluates whether inference-time interventions make small language models (SLMs) produce simpler English answers for beginner learners. Prompts are themed around CEFR A1 topics; the primary binary outcome is **CEFR-SP document level A1** (`meets_a1_criteria` when `cefr_sp_level == "A1"`). Four models are tested across interventions that aim to simplify vocabulary and sentence structure.
 
 ## Models
 
@@ -98,21 +98,15 @@ No weighting, no contextual prompting.
 | 3 (default, development/smoke only) | 4 × 4 × 3 = 48 |
 | 25 (`--prompts all`, formal claims) | 4 × 4 × 25 = 400 |
 
-### Success Criteria (automated readability proxy)
+### Success Criteria (CEFR-SP A1 gate)
 
 **Generation success** (`generation_successful=True`) means the model produced valid, non-empty output with computable metrics. Failed generations (empty output, thinking-tag artifacts, metric computation errors) are recorded with `generation_successful=False` and excluded from summary metric means.
 
-**Readability proxy pass** (`meets_a1_criteria=True`) is an **automated US readability gate**, not a CEFR A1 communicative assessment. Prompt themes are CEFR-inspired; the binary flag only checks that all three formula thresholds hold on a valid generation:
-
-| Metric | Threshold |
-|--------|-----------|
-| Flesch-Kincaid Grade | ≤ 5.0 |
-| Gunning Fog | ≤ 6.0 |
-| Spache Readability | ≤ 4.0 |
+**A1 pass** (`meets_a1_criteria=True`) means a valid generation whose CEFR-SP document level is **A1** (`cefr_sp_level == "A1"`). Implemented in `evaluation/a1_criteria.py` from Arase et al. CEFR-SP aggregates. US readability formulas (FK / Fog / Spache) are recorded for analysis but do not decide the gate. With CEFR-SP disabled, `meets_a1_criteria` is always False.
 
 SMOG is **not** used — short model outputs cannot satisfy its 30-sentence minimum.
 
-The field name `meets_a1_criteria` is historical. Treat `a1_pass_rate` / `a1_pass_count` in `summary.json` as **proxy pass rate / count**. Human ratings (`human export` / `import`) assess agreement with this proxy; they are not folded into the automatic flag. Metric means still exclude failed generations.
+Treat `a1_pass_rate` / `a1_pass_count` in `summary.json` as CEFR-SP A1 pass rate / count. Human ratings (`human export` / `import`) assess agreement with this flag; they are not folded into the automatic gate. Metric means still exclude failed generations.
 
 ## Phase 2 — Hyperparameter Sweeps
 
