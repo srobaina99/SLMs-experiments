@@ -22,6 +22,9 @@ class TestCliPhase1Run:
             seed=7,
             no_plot=False,
             cli_args=["phase1", "--prompts", "3", "--seed", "7"],
+            enable_cefr_sp=True,
+            cefr_sp_ckpt_path="",
+            cefr_sp_device="cpu",
         )
 
         captured = capsys.readouterr()
@@ -51,6 +54,9 @@ class TestCliPhase1Run:
             seed=42,
             no_plot=False,
             cli_args=["phase1", "--prompts", "1"],
+            enable_cefr_sp=True,
+            cefr_sp_ckpt_path="",
+            cefr_sp_device="cpu",
         )
 
     @patch("slm_experiments.plot.plot_run")
@@ -86,7 +92,9 @@ class TestCliRuns:
         from slm_experiments.core.run_store import RunStore, make_run_id
 
         pipeline = ExperimentPipeline()
-        config = ExperimentConfig(model_name="Qwen3", prompt_id="P1")
+        config = ExperimentConfig(
+            model_name="Qwen3", prompt_id="P1", enable_cefr_sp=False
+        )
         result = pipeline.run("What is a dog?", config, MockSuccessModel())
         store = RunStore(tmp_path / "results")
         run_id = make_run_id(1, "factorial")
@@ -137,6 +145,9 @@ class TestCliPhase2Run:
             seed=7,
             no_plot=False,
             cli_args=["phase2", "weights", "--prompts", "3", "--seed", "7"],
+            enable_cefr_sp=True,
+            cefr_sp_ckpt_path="",
+            cefr_sp_device="cpu",
         )
 
         captured = capsys.readouterr()
@@ -168,6 +179,9 @@ class TestCliPhase2Run:
             seed=42,
             no_plot=False,
             cli_args=["phase2", "prompting", "--shots", "0,1,3"],
+            enable_cefr_sp=True,
+            cefr_sp_ckpt_path="",
+            cefr_sp_device="cpu",
         )
 
         captured = capsys.readouterr()
@@ -216,6 +230,9 @@ class TestCliPhase2Run:
             no_plot=False,
             cli_args=["phase2", "guided", "--top-k-pools", "5,10,20", "--seed", "7"],
             mode="flat",
+            enable_cefr_sp=True,
+            cefr_sp_ckpt_path="",
+            cefr_sp_device="cpu",
         )
 
         captured = capsys.readouterr()

@@ -17,12 +17,6 @@ SIMPLE_RESPONSE = (
     "You play with a friend. A friend helps you."
 )
 
-COMPLEX_RESPONSE = (
-    "The multifaceted ramifications of epistemological paradigms necessitate "
-    "comprehensive interdisciplinary investigation. Furthermore, methodological "
-    "inconsistencies undermine the validity of longitudinal analyses."
-)
-
 
 class MockSuccessModel:
     def generate(self, prompt: str, config: ExperimentConfig) -> dict:
@@ -90,15 +84,6 @@ class MockKvlBeamModelWrapper:
         }
 
 
-class MockComplexModel:
-    def generate(self, prompt: str, config: ExperimentConfig) -> dict:
-        return {
-            "response": COMPLEX_RESPONSE,
-            "response_time_seconds": 2.0,
-            "generation_successful": True,
-        }
-
-
 class MockFailureModel:
     def generate(self, prompt: str, config: ExperimentConfig) -> dict:
         return {
@@ -108,24 +93,38 @@ class MockFailureModel:
         }
 
 
+class _HardCefrSpScorer:
+    """Force non-A1 CEFR-SP labels so meets_a1_criteria fails."""
+
+    def score_sentences(self, sentences):
+        return [
+            {"label": 5, "probs": [0.0, 0.0, 0.0, 0.0, 0.0, 1.0]} for _ in sentences
+        ]
+
+
 def _make_a1_pipeline_results():
-    """One A1-passing and one valid-but-failing result from the pipeline."""
-    pipeline = ExperimentPipeline()
+    """One A1-passing and one valid-but-failing (CEFR-SP not A1) result."""
     config_simple = ExperimentConfig(
         model_name="Qwen3",
         config_weighting=False,
         config_prompting=True,
         prompt_id="p01",
     )
-    config_complex = ExperimentConfig(
+    config_hard = ExperimentConfig(
         model_name="Qwen3",
         config_weighting=True,
         config_prompting=False,
         prompt_id="p02",
     )
-    simple = pipeline.run("What is a friend?", config_simple, MockSuccessModel())
-    complex = pipeline.run("What is a friend?", config_complex, MockComplexModel())
-    return [simple, complex]
+    # Default unit-test stub scores A1 → gate passes.
+    simple = ExperimentPipeline().run(
+        "What is a friend?", config_simple, MockSuccessModel()
+    )
+    # Hard CEFR-SP labels → gate fails even on readable text.
+    hard = ExperimentPipeline(cefr_sp_scorer=_HardCefrSpScorer()).run(
+        "What is a friend?", config_hard, MockSuccessModel()
+    )
+    return [simple, hard]
 
 
 def _make_results():

@@ -1,46 +1,61 @@
-"""Tests for A1 pass criteria."""
+"""Tests for A1 pass criteria (CEFR-SP gate)."""
 
-from slm_experiments.evaluation.a1_criteria import A1ReadabilityThresholds, meets_a1_criteria
+from slm_experiments.evaluation.a1_criteria import meets_a1_criteria
 
 
-def test_passes_when_all_thresholds_met():
+def test_passes_when_cefr_sp_level_is_a1():
     assert meets_a1_criteria(
-        4.0, 5.0, 3.0, generation_valid=True
+        generation_valid=True,
+        cefr_sp_enabled=True,
+        cefr_sp_level="A1",
     )
 
 
-def test_fails_when_fk_exceeds_threshold():
+def test_fails_when_cefr_sp_level_is_a2_or_higher():
+    for level in ("A2", "B1", "B2", "C1", "C2"):
+        assert not meets_a1_criteria(
+            generation_valid=True,
+            cefr_sp_enabled=True,
+            cefr_sp_level=level,
+        )
+
+
+def test_fails_when_generation_invalid():
     assert not meets_a1_criteria(
-        5.1, 5.0, 3.0, generation_valid=True
+        generation_valid=False,
+        cefr_sp_enabled=True,
+        cefr_sp_level="A1",
     )
 
 
-def test_fails_when_fog_exceeds_threshold():
+def test_fails_when_cefr_sp_disabled():
     assert not meets_a1_criteria(
-        4.0, 6.1, 3.0, generation_valid=True
+        generation_valid=True,
+        cefr_sp_enabled=False,
+        cefr_sp_level="A1",
     )
 
 
-def test_fails_when_spache_exceeds_threshold():
+def test_fails_when_cefr_sp_level_missing():
     assert not meets_a1_criteria(
-        4.0, 5.0, 4.1, generation_valid=True
+        generation_valid=True,
+        cefr_sp_enabled=True,
+        cefr_sp_level=None,
     )
 
 
-def test_fails_when_generation_invalid_even_if_metrics_zero():
-    assert not meets_a1_criteria(
-        0.0, 0.0, 0.0, generation_valid=False
-    )
-
-
-def test_boundary_values_pass():
+def test_accepts_cefr_sp_metrics_mapping():
     assert meets_a1_criteria(
-        5.0, 6.0, 4.0, generation_valid=True
+        generation_valid=True,
+        cefr_sp_metrics={
+            "cefr_sp_enabled": True,
+            "cefr_sp_level": "A1",
+        },
     )
-
-
-def test_custom_thresholds():
-    strict = A1ReadabilityThresholds(flesch_kincaid_max=3.0, gunning_fog_max=4.0, spache_max=2.0)
-    # 4.0, 5.0, 3.0 passes default but fails strict
-    assert meets_a1_criteria(4.0, 5.0, 3.0, generation_valid=True)
-    assert not meets_a1_criteria(4.0, 5.0, 3.0, generation_valid=True, thresholds=strict)
+    assert not meets_a1_criteria(
+        generation_valid=True,
+        cefr_sp_metrics={
+            "cefr_sp_enabled": True,
+            "cefr_sp_level": "C1",
+        },
+    )

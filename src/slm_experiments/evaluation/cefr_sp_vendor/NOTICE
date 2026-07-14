@@ -1,0 +1,20 @@
+CEFR-SP (vendored model sources)
+================================
+
+These files are thin copies of the official CEFR-SP training/inference modules from:
+
+  https://github.com/yukiar/CEFR-SP  (main/src/: model.py, model_base.py, util.py)
+
+Paper:
+  Yuki Arase, Satoru Uchida, and Tomoyuki Kajiwara. 2022.
+  CEFR-Based Sentence Difficulty Annotation and Assessment.
+  EMNLP 2022. https://aclanthology.org/2022.emnlp-main.416/
+
+Pretrained checkpoint (not vendored here; download separately):
+  Zenodo DOI 10.5281/zenodo.7234096 — CC BY 4.0
+  https://creativecommons.org/licenses/by/4.0/
+
+Modifications in this vendor copy:
+  - Relative package imports
+  - Removed training/CLI-only plotting and sklearn report deps
+  - Safe fallback when loss-weight corpus files are absent (checkpoint load)

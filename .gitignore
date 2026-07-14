@@ -9,6 +9,10 @@ venv/
 # Models (large GGUF files — place manually in models/gguf/)
 models/gguf/*.gguf
 
+# CEFR-SP checkpoint (~1.2GB — download via scripts/download_cefr_sp_ckpt.py)
+data/cefr_sp/*.ckpt
+data/cefr_sp/*.ckpt.partial
+
 # Experiment results
 results/runs/*/
 !results/runs/.gitkeep

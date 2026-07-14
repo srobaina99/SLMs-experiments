@@ -122,9 +122,13 @@ class HumanExporter:
         review_df = sampled[
             ["experiment_id", "model", "config", "prompt_id", "answer"]
         ].copy()
-        review_df["response_appropriateness"] = ""
-        review_df["vocabulary_level"] = ""
-        review_df["notes"] = ""
+        review_df["response_appropriateness"] = pd.Series(
+            [pd.NA] * len(review_df), dtype="Float64"
+        )
+        review_df["vocabulary_level"] = pd.Series(
+            [pd.NA] * len(review_df), dtype="string"
+        )
+        review_df["notes"] = pd.Series([pd.NA] * len(review_df), dtype="string")
 
         out_path = run_dir / HUMAN_REVIEW_FILENAME
         review_df[EXPORT_COLUMNS].to_csv(out_path, index=False)

@@ -37,6 +37,11 @@ NUMERIC_SUMMARY_COLUMNS = [
     "kvl_lookup_coverage",
     "kvl_oov_count",
     "kvl_pct_hard_words",
+    "cefr_sp_level_ordinal",
+    "cefr_sp_pct_a1",
+    "cefr_sp_adjacency",
+    "cefr_sp_max_level_ordinal",
+    "cefr_sp_expected_level",
 ]
 
 SWEEP_SUMMARY_SECTIONS = {
@@ -83,7 +88,9 @@ def _aggregate_metric_stats(df: pd.DataFrame) -> Dict[str, Any]:
 
     for col in NUMERIC_SUMMARY_COLUMNS:
         if col in successful.columns and not successful.empty:
-            stats[col] = _metric_stats(successful[col])
+            col_stats = _metric_stats(successful[col])
+            if col_stats is not None:
+                stats[col] = col_stats
     return stats
 
 
@@ -198,12 +205,16 @@ def _config_label(row: pd.Series) -> str:
     return "control"
 
 
-def _metric_stats(series: pd.Series) -> Dict[str, float]:
+def _metric_stats(series: pd.Series) -> Optional[Dict[str, float]]:
+    """Aggregate numeric values, ignoring nulls (e.g. disabled CEFR-SP fields)."""
+    clean = pd.to_numeric(series, errors="coerce").dropna()
+    if clean.empty:
+        return None
     return {
-        "mean": float(series.mean()),
-        "std": float(series.std()) if len(series) > 1 else 0.0,
-        "min": float(series.min()),
-        "max": float(series.max()),
+        "mean": float(clean.mean()),
+        "std": float(clean.std()) if len(clean) > 1 else 0.0,
+        "min": float(clean.min()),
+        "max": float(clean.max()),
     }
 
 
@@ -222,7 +233,9 @@ def compute_summary_stats(
 
     for col in NUMERIC_SUMMARY_COLUMNS:
         if col in successful_df.columns and not successful_df.empty:
-            summary["overall"][col] = _metric_stats(successful_df[col])
+            col_stats = _metric_stats(successful_df[col])
+            if col_stats is not None:
+                summary["overall"][col] = col_stats
 
     if "config_weighting" in df.columns and "config_prompting" in df.columns:
         df = df.copy()

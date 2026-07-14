@@ -11,6 +11,7 @@ from typing import List, Optional, Tuple, Union
 
 from tqdm import tqdm
 
+from slm_experiments.core.config import cefr_sp_config_kwargs
 from slm_experiments.core.pipeline import ExperimentPipeline
 from slm_experiments.core.prompts import MODEL_CONFIGS, STANDARD_PROMPTS
 from slm_experiments.core.result import ExperimentResult
@@ -67,6 +68,9 @@ class FactorialRunner:
         seed: int = 42,
         no_plot: bool = False,
         cli_args: Optional[List[str]] = None,
+        enable_cefr_sp: bool = True,
+        cefr_sp_ckpt_path: str = "",
+        cefr_sp_device: str = "cpu",
     ) -> Tuple[str, Path]:
         """
         Execute the factorial experiment and write a run bundle.
@@ -76,6 +80,11 @@ class FactorialRunner:
         """
         prompt_list = parse_prompts(prompts)
         model_list = parse_models(models)
+        cefr_sp_fields = cefr_sp_config_kwargs(
+            enable_cefr_sp=enable_cefr_sp,
+            cefr_sp_ckpt_path=cefr_sp_ckpt_path,
+            cefr_sp_device=cefr_sp_device,
+        )
 
         all_configs = create_factorial_configs()
         configs_by_model = {
@@ -105,7 +114,9 @@ class FactorialRunner:
                     pbar.set_description(f"{model_name} {prompt_id}")
 
                     for base_config in model_configs:
-                        config = replace(base_config, prompt_id=prompt_id)
+                        config = replace(
+                            base_config, prompt_id=prompt_id, **cefr_sp_fields
+                        )
                         pbar.set_postfix(
                             weighting=config.config_weighting,
                             prompting=config.config_prompting,

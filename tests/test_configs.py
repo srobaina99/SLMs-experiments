@@ -17,6 +17,7 @@ class TestExperimentConfig:
         assert config.weight_factor == 1.0
         assert config.num_shots == 0
         assert config.temperature == 0.0
+        assert config.enable_cefr_sp is True
 
     def test_to_dict(self):
         config = ExperimentConfig(

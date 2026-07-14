@@ -143,18 +143,24 @@ class TestExperimentPipeline:
         assert result.generation_successful is False
         assert result.meets_a1_criteria is False
 
-    def test_meets_a1_criteria_false_when_text_too_complex(self):
+    def test_meets_a1_criteria_false_when_cefr_sp_not_a1(self):
+        """A1 gate follows CEFR-SP level, not FK/Fog/Spache."""
+
+        class HardCefrSpScorer:
+            def score_sentences(self, sentences):
+                return [
+                    {"label": 5, "probs": [0.0, 0.0, 0.0, 0.0, 0.0, 1.0]}
+                    for _ in sentences
+                ]
+
         config = ExperimentConfig(model_name="Qwen3", prompt_id="p04")
-        pipeline = ExperimentPipeline()
-        result = pipeline.run("Explain epistemology.", config, MockComplexModel())
+        pipeline = ExperimentPipeline(cefr_sp_scorer=HardCefrSpScorer())
+        # Simple readability text, but CEFR-SP labels are C2 → gate fails
+        result = pipeline.run("What is a friend?", config, MockSuccessModel())
 
         assert result.generation_successful is True
+        assert result.cefr_sp_level == "C2"
         assert result.meets_a1_criteria is False
-        assert (
-            result.flesch_kincaid_grade > 5
-            or result.gunning_fog > 6
-            or result.spache_readability > 4
-        )
 
     def test_run_beam_sets_meets_a1_true_on_simple_text(self):
         config = ExperimentConfig(model_name="Qwen3", prompt_id="p05")
@@ -166,12 +172,20 @@ class TestExperimentPipeline:
         assert result.generation_successful is True
         assert result.meets_a1_criteria is True
 
-    def test_run_beam_sets_meets_a1_false_on_complex_text(self):
+    def test_run_beam_sets_meets_a1_false_when_cefr_sp_not_a1(self):
+        class HardCefrSpScorer:
+            def score_sentences(self, sentences):
+                return [
+                    {"label": 4, "probs": [0.0, 0.0, 0.0, 0.0, 1.0, 0.0]}
+                    for _ in sentences
+                ]
+
         config = ExperimentConfig(model_name="Qwen3", prompt_id="p06")
-        pipeline = ExperimentPipeline()
+        pipeline = ExperimentPipeline(cefr_sp_scorer=HardCefrSpScorer())
         result = pipeline.run_beam(
-            "Explain epistemology.", config, MockBeamComplexModel(), beam_width=4
+            "What is a friend?", config, MockBeamSuccessModel(), beam_width=4
         )
 
         assert result.generation_successful is True
+        assert result.cefr_sp_level == "C1"
         assert result.meets_a1_criteria is False
