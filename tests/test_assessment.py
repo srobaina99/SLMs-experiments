@@ -314,6 +314,205 @@ class TestScoringSeam:
         scored = score_items(items)
         assert scored.loc[0, "dummy_score"] == 1.0
 
+    def test_duplicate_register_without_replace_raises(self):
+        @register_scorer("dup")
+        def first(items: pd.DataFrame) -> pd.DataFrame:
+            return pd.DataFrame({"item_id": items["item_id"]})
+
+        with pytest.raises(ValueError, match="scorer already registered: dup"):
+
+            @register_scorer("dup")
+            def second(items: pd.DataFrame) -> pd.DataFrame:
+                return pd.DataFrame({"item_id": items["item_id"]})
+
+    def test_scorer_missing_item_id_raises(self):
+        @register_scorer("no_id")
+        def no_id(items: pd.DataFrame) -> pd.DataFrame:
+            return pd.DataFrame({"score": [1.0] * len(items)})
+
+        items = pd.DataFrame({"item_id": ["a"], "cleaned_response": ["hi"]})
+        with pytest.raises(ValueError, match="must return an item_id column"):
+            score_items(items)
+
+
+class TestAssessmentBuildGuards:
+    def test_build_empty_source_list_raises(self, tmp_path: Path):
+        bundler = AssessmentBundler(results_root=tmp_path)
+        with pytest.raises(ValueError, match="at least one source_run_id"):
+            bundler.build([])
+
+    def test_build_missing_source_run_raises(self, tmp_path: Path):
+        bundler = AssessmentBundler(results_root=tmp_path)
+        with pytest.raises(FileNotFoundError, match="Source run bundle not found"):
+            bundler.build(["missing_run_id"])
+
+    def test_build_empty_source_csvs_raises(self, tmp_path: Path):
+        source_id, store = _pipeline_results_with_failures(tmp_path)
+        cols = store.read_full_csv(source_id).columns
+        store.write_full_csv(source_id, pd.DataFrame(columns=cols))
+        bundler = AssessmentBundler(results_root=tmp_path)
+        with pytest.raises(ValueError, match="no observations found in source runs"):
+            bundler.build([source_id])
+
+    def test_build_blank_full_csv_raises_clear_error(self, tmp_path: Path):
+        store = RunStore(tmp_path)
+        run_id = "20260606_143022_phase2_weights"
+        run_dir = store.run_dir(run_id)
+        run_dir.mkdir(parents=True)
+        (run_dir / "full.csv").write_text("")
+        (run_dir / "manifest.json").write_text(
+            '{"kind":"generation","phase":2,"experiment":"weights"}'
+        )
+        with pytest.raises(ValueError, match="full.csv is empty"):
+            store.read_full_csv(run_id)
+        bundler = AssessmentBundler(results_root=tmp_path)
+        with pytest.raises(ValueError, match="full.csv is empty"):
+            bundler.build([run_id])
+
+    def test_whitespace_only_success_not_scorable(self, tmp_path: Path):
+        pipeline = ExperimentPipeline()
+        result = pipeline.run(
+            "What is a friend?",
+            ExperimentConfig(
+                model_name="Qwen3",
+                config_weighting=False,
+                config_prompting=True,
+                prompt_id="p01",
+                weight_factor=1.0,
+                enable_cefr_sp=False,
+            ),
+            MockSuccessModel("   \t\n"),
+        )
+        assert result.generation_successful is False
+        store = RunStore(tmp_path)
+        started = datetime(2026, 6, 6, 14, 30, 22, tzinfo=timezone.utc)
+        run_id = make_run_id(2, "weights", started_at=started.replace(tzinfo=None))
+        store.write_bundle(
+            run_id,
+            [result],
+            phase=2,
+            experiment="weights",
+            cli_args=["--prompts", "1"],
+            models=["Qwen3"],
+            prompt_count=1,
+            started_at=started,
+            completed_at=started,
+        )
+        # Force a stale successful flag with whitespace-only text (hand-edit path).
+        full = store.read_full_csv(run_id)
+        full["cleaned_response"] = full["cleaned_response"].astype(object)
+        full.loc[0, "generation_successful"] = True
+        full.loc[0, "cleaned_response"] = "   "
+        store.write_full_csv(run_id, full)
+        assess_id, _ = AssessmentBundler(results_root=tmp_path).build([run_id])
+        items = store.read_items_csv(assess_id)
+        item_map = store.read_item_map_csv(assess_id)
+        assert items.empty
+        assert bool(item_map.iloc[0]["in_sample"]) is False
+        item_id = item_map.iloc[0]["item_id"]
+        assert item_id is None or (isinstance(item_id, float) and pd.isna(item_id)) or str(item_id).strip() in {"", "nan"}
+
+    def test_build_sample_non_positive_raises(self, tmp_path: Path):
+        source_id, _ = _pipeline_results_with_failures(tmp_path)
+        bundler = AssessmentBundler(results_root=tmp_path)
+        with pytest.raises(ValueError, match="sample size must be positive"):
+            bundler.build([source_id], sample=0)
+        with pytest.raises(ValueError, match="sample size must be positive"):
+            bundler.build([source_id], sample=-1)
+
+    def test_build_auto_writes_analysis_artifacts(self, tmp_path: Path):
+        source_id, store = _pipeline_results_with_failures(tmp_path)
+        bundler = AssessmentBundler(results_root=tmp_path)
+        assess_id, out_dir = bundler.build([source_id])
+
+        analysis_dir = out_dir / "analysis"
+        assert analysis_dir.is_dir()
+        assert (analysis_dir / "paired_deltas.csv").exists() or (
+            analysis_dir / "analysis.json"
+        ).exists()
+        manifest = store.read_manifest(assess_id)
+        assert "analysis" in manifest
+
+    def test_build_multi_source_concat_and_cross_run_dedup(self, tmp_path: Path):
+        """Identical (prompt_id, cleaned_response) across runs collapses to one item."""
+        pipeline = ExperimentPipeline()
+        shared = pipeline.run(
+            "What is a friend?",
+            ExperimentConfig(
+                model_name="Qwen3",
+                config_weighting=False,
+                config_prompting=True,
+                prompt_id="p01",
+                weight_factor=1.0,
+            ),
+            MockSuccessModel(SIMPLE_RESPONSE),
+        )
+        other = pipeline.run(
+            "What is a dog?",
+            ExperimentConfig(
+                model_name="TinyLlama",
+                config_weighting=True,
+                config_prompting=True,
+                prompt_id="p02",
+                weight_factor=2.0,
+            ),
+            MockSuccessModel(ALT_RESPONSE),
+        )
+        store = RunStore(tmp_path)
+        started_a = datetime(2026, 6, 6, 14, 30, 22, tzinfo=timezone.utc)
+        started_b = datetime(2026, 6, 6, 15, 0, 0, tzinfo=timezone.utc)
+        run_a = make_run_id(2, "weights", started_at=started_a.replace(tzinfo=None))
+        run_b = make_run_id(2, "prompting", started_at=started_b.replace(tzinfo=None))
+        store.write_bundle(
+            run_a,
+            [shared],
+            phase=2,
+            experiment="weights",
+            cli_args=["--prompts", "1"],
+            models=["Qwen3"],
+            prompt_count=1,
+            started_at=started_a,
+            completed_at=started_a,
+        )
+        # Same SIMPLE_RESPONSE / p01 plus a distinct second text.
+        shared_b = pipeline.run(
+            "What is a friend?",
+            ExperimentConfig(
+                model_name="Phi3",
+                config_weighting=False,
+                config_prompting=False,
+                prompt_id="p01",
+                weight_factor=1.0,
+            ),
+            MockSuccessModel(SIMPLE_RESPONSE),
+        )
+        store.write_bundle(
+            run_b,
+            [shared_b, other],
+            phase=2,
+            experiment="prompting",
+            cli_args=["--prompts", "2"],
+            models=["Phi3", "TinyLlama"],
+            prompt_count=2,
+            started_at=started_b,
+            completed_at=started_b,
+        )
+
+        assess_id, _ = AssessmentBundler(results_root=tmp_path).build([run_a, run_b])
+        items = store.read_items_csv(assess_id)
+        item_map = store.read_item_map_csv(assess_id)
+        manifest = store.read_manifest(assess_id)
+
+        assert set(manifest["source_run_ids"]) == {run_a, run_b}
+        # Two unique texts → two items (shared text deduped across runs).
+        assert len(items) == 2
+        shared_maps = item_map[
+            (item_map["prompt_id"] == "p01")
+            & (item_map["in_sample"] == True)  # noqa: E712
+        ]
+        assert set(shared_maps["source_run_id"]) == {run_a, run_b}
+        assert shared_maps["item_id"].nunique() == 1
+
 
 class TestKindAwareRuns:
     def test_list_runs_includes_assessment_kind(self, tmp_path: Path):

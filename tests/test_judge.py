@@ -402,6 +402,32 @@ class TestJudgeExportImport:
             with pytest.raises(FileNotFoundError, match="Judge schema source missing"):
                 JudgeExporter(results_root=tmp_path).export(assess_id)
 
+    def test_export_rejects_generation_kind(self, tmp_path: Path):
+        pipeline = ExperimentPipeline()
+        result = pipeline.run(
+            "What is a friend?",
+            ExperimentConfig(
+                model_name="Qwen3",
+                config_weighting=False,
+                config_prompting=True,
+                prompt_id="p01",
+                weight_factor=1.0,
+            ),
+            MockSuccessModel(SIMPLE_RESPONSE),
+        )
+        store = RunStore(tmp_path)
+        gen_id = _write_generation_bundle(store, [result])
+        with pytest.raises(ValueError, match="not an assessment bundle"):
+            JudgeExporter(results_root=tmp_path).export(gen_id)
+
+    def test_export_rejects_empty_items(self, tmp_path: Path):
+        assess_id, store = _build_assessment_bundle(tmp_path)
+        items_path = store.run_dir(assess_id) / "items.csv"
+        cols = pd.read_csv(items_path).columns
+        pd.DataFrame(columns=cols).to_csv(items_path, index=False)
+        with pytest.raises(ValueError, match="has no items"):
+            JudgeExporter(results_root=tmp_path).export(assess_id)
+
     def test_build_records_from_items_frame(self):
         items = pd.DataFrame(
             [

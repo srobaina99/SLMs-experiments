@@ -34,14 +34,28 @@ def easier_deltas(
 
 def ci_excludes_zero(ci_low: float, ci_high: float) -> bool:
     """Descriptive flag: True when the two-sided CI does not contain 0."""
-    return not (ci_low <= 0.0 <= ci_high)
+    try:
+        low = float(ci_low)
+        high = float(ci_high)
+    except (TypeError, ValueError):
+        return False
+    if not (np.isfinite(low) and np.isfinite(high)):
+        return False
+    return not (low <= 0.0 <= high)
 
 
 def direction_from_ci(ci_low: float, ci_high: float) -> Direction:
     """Descriptive direction from an easier_delta CI (positive = easier)."""
-    if ci_low > 0.0:
+    try:
+        low = float(ci_low)
+        high = float(ci_high)
+    except (TypeError, ValueError):
+        return "none"
+    if not (np.isfinite(low) and np.isfinite(high)):
+        return "none"
+    if low > 0.0:
         return "easier"
-    if ci_high < 0.0:
+    if high < 0.0:
         return "harder"
     return "none"
 
@@ -91,6 +105,38 @@ def percentile_bootstrap_ci(
     high = float(np.quantile(means, 1.0 - alpha, method="linear"))
     return {"point_estimate": point, "ci_low": low, "ci_high": high}
 
+def _dedupe_prompt_values(
+    frame: pd.DataFrame,
+    *,
+    prompt_col: str,
+    value_col: str,
+    side: str,
+) -> pd.DataFrame:
+    """Keep one row per prompt; raise if the same prompt has conflicting values."""
+    working = frame[[prompt_col, value_col]].copy()
+    working[value_col] = pd.to_numeric(working[value_col], errors="coerce")
+    working = working.dropna(subset=[value_col])
+    working = working[np.isfinite(working[value_col])]
+    if working.empty:
+        return working
+
+    dup_mask = working.duplicated(subset=[prompt_col], keep=False)
+    if dup_mask.any():
+        conflicts: list[str] = []
+        for prompt_id, group in working.loc[dup_mask].groupby(prompt_col, sort=False):
+            if group[value_col].nunique(dropna=True) > 1:
+                conflicts.append(str(prompt_id))
+        if conflicts:
+            sample = ", ".join(conflicts[:5])
+            more = "" if len(conflicts) <= 5 else f" (+{len(conflicts) - 5} more)"
+            raise ValueError(
+                f"Conflicting {value_col} values for {side} prompt_id(s): "
+                f"{sample}{more}. Pass a single source run per family/arm, or "
+                f"resolve duplicates before analysis."
+            )
+    return working.drop_duplicates(subset=[prompt_col], keep="first")
+
+
 def build_paired_deltas(
     baseline: pd.DataFrame,
     intervention: pd.DataFrame,
@@ -104,14 +150,11 @@ def build_paired_deltas(
     Incomplete pairs (missing either side or non-finite value) are dropped.
     ``n_pairs_dropped`` is attached to every retained row for convenience.
     """
-    base = baseline[[prompt_col, value_col]].copy()
-    base[value_col] = pd.to_numeric(base[value_col], errors="coerce")
-    base = base.dropna(subset=[value_col]).drop_duplicates(subset=[prompt_col], keep="first")
-
-    interv = intervention[[prompt_col, value_col]].copy()
-    interv[value_col] = pd.to_numeric(interv[value_col], errors="coerce")
-    interv = interv.dropna(subset=[value_col]).drop_duplicates(
-        subset=[prompt_col], keep="first"
+    base = _dedupe_prompt_values(
+        baseline, prompt_col=prompt_col, value_col=value_col, side="baseline"
+    )
+    interv = _dedupe_prompt_values(
+        intervention, prompt_col=prompt_col, value_col=value_col, side="intervention"
     )
 
     candidate_prompts = sorted(
@@ -174,11 +217,15 @@ def _metric_frame(
             return pd.DataFrame(columns=["prompt_id", col])
         score_cols = ["item_id", col]
         status_col = spec["status_column"]
-        if status_col and status_col in scores.columns:
+        # Status gating is required for secondary scorers; missing status must
+        # not silently treat error/missing rows as ok.
+        if status_col:
+            if status_col not in scores.columns:
+                return pd.DataFrame(columns=["prompt_id", col])
             score_cols.append(status_col)
         scored = scores[score_cols].drop_duplicates("item_id", keep="first")
         working = working.merge(scored, on="item_id", how="inner")
-        if status_col and status_col in working.columns:
+        if status_col:
             working = working[working[status_col] == spec["status_ok"]]
     else:
         # CEFR-SP ordinal lives on item_map after the schema extension.
@@ -191,7 +238,9 @@ def _metric_frame(
     working = working[working["item_id"].astype(str).str.strip() != ""]
     working[col] = pd.to_numeric(working[col], errors="coerce")
     working = working.dropna(subset=[col])
-    return working[["prompt_id", col]].drop_duplicates("prompt_id", keep="first")
+    return _dedupe_prompt_values(
+        working, prompt_col="prompt_id", value_col=col, side="metric_frame"
+    )
 
 
 def _annotate_map(item_map: pd.DataFrame) -> pd.DataFrame:

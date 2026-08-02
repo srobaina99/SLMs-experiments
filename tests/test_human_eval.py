@@ -204,6 +204,45 @@ class TestHumanImport:
         with pytest.raises(ValueError, match="unknown experiment_id"):
             importer.import_tags(run_id, bad_path)
 
+    def test_import_rejects_missing_columns_and_duplicate_experiment_id(
+        self, tmp_path: Path
+    ):
+        run_id, store = _build_factorial_bundle(tmp_path, num_prompts=2)
+        exporter = HumanExporter(results_root=tmp_path)
+        out_path, _ = exporter.export(run_id, sample=2, seed=42)
+        importer = HumanImporter(results_root=tmp_path)
+
+        missing_cols = pd.DataFrame(
+            {"experiment_id": ["x"], "response_appropriateness": [3]}
+        )
+        missing_path = store.run_dir(run_id) / "missing_cols.csv"
+        missing_cols.to_csv(missing_path, index=False)
+        with pytest.raises(ValueError, match="Tags CSV missing columns"):
+            importer.import_tags(run_id, missing_path)
+
+        no_exp_id = pd.DataFrame(
+            {
+                "response_appropriateness": [3],
+                "vocabulary_level": ["beginner"],
+                "notes": [""],
+            }
+        )
+        no_id_path = store.run_dir(run_id) / "no_experiment_id.csv"
+        no_exp_id.to_csv(no_id_path, index=False)
+        with pytest.raises(
+            ValueError, match="Tags CSV must include an experiment_id column"
+        ):
+            importer.import_tags(run_id, no_id_path)
+
+        review = pd.read_csv(out_path)
+        dup = pd.concat([review, review.iloc[[0]]], ignore_index=True)
+        dup_path = store.run_dir(run_id) / "dup_tags.csv"
+        dup.to_csv(dup_path, index=False)
+        with pytest.raises(
+            ValueError, match="Tags CSV contains duplicate experiment_id values"
+        ):
+            importer.import_tags(run_id, dup_path)
+
 
 class TestHumanRoundTrip:
     def test_export_import_round_trip(self, tmp_path: Path):

@@ -175,6 +175,38 @@ class TestTokenization:
 
 
 class TestCefrSpScorerLoad:
+    def test_missing_ckpt_raises_file_not_found(self, tmp_path):
+        """Enabled CEFR-SP with missing ckpt fails loud — no soft-degrade path."""
+        from slm_experiments.evaluation.cefr_sp import CefrSpScorer
+
+        missing = tmp_path / "does_not_exist.ckpt"
+        scorer = CefrSpScorer(ckpt_path=str(missing), device="cpu")
+        with pytest.raises(FileNotFoundError, match="CEFR-SP checkpoint not found"):
+            scorer.score_sentences(["Hello world."])
+
+    def test_pipeline_missing_ckpt_aborts_without_result(self, tmp_path):
+        """pipeline.run does not catch missing-ckpt errors or record a partial row."""
+
+        class SuccessModel:
+            def generate(self, prompt, config):
+                return {
+                    "response": "A friend is a person you like.",
+                    "response_time_seconds": 0.1,
+                    "generation_successful": True,
+                }
+
+        missing = tmp_path / "missing.ckpt"
+        config = ExperimentConfig(
+            model_name="Qwen3",
+            prompt_id="p01",
+            enable_cefr_sp=True,
+            cefr_sp_ckpt_path=str(missing),
+        )
+        # Real scorer (no inject) so _resolve_cefr_sp_scorer builds CefrSpScorer.
+        pipeline = ExperimentPipeline()
+        with pytest.raises(FileNotFoundError, match="CEFR-SP checkpoint not found"):
+            pipeline.run("What is a friend?", config, SuccessModel())
+
     def test_ensure_loaded_overrides_zenodo_pretrained_model_path(
         self, tmp_path, monkeypatch
     ):

@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Union
 
 import pandas as pd
 
+from slm_experiments.core.bool_series import coerce_bool_series
 from slm_experiments.core.config_label import config_label
 from slm_experiments.core.result import ExperimentResult
 
@@ -72,7 +73,8 @@ def _sweep_sort_key(column: str, value: Any) -> float:
 
 def _aggregate_metric_stats(df: pd.DataFrame) -> Dict[str, Any]:
     """Build count + metric stats for one group, excluding failed generations."""
-    successful = df[df["generation_successful"] == True]  # noqa: E712
+    success_flags = coerce_bool_series(df["generation_successful"])
+    successful = df.loc[success_flags]
     stats: Dict[str, Any] = {
         "count": int(len(df)),
         "generation_successful_count": int(len(successful)),
@@ -83,7 +85,7 @@ def _aggregate_metric_stats(df: pd.DataFrame) -> Dict[str, Any]:
         stats["generation_failure_rate"] = 0.0
 
     if "hit_max_tokens" in df.columns:
-        maxed = int(df["hit_max_tokens"].fillna(False).astype(bool).sum())
+        maxed = int(coerce_bool_series(df["hit_max_tokens"]).sum())
         stats["hit_max_tokens_count"] = maxed
         stats["hit_max_tokens_rate"] = float(maxed / len(df)) if len(df) else 0.0
     else:
@@ -91,12 +93,14 @@ def _aggregate_metric_stats(df: pd.DataFrame) -> Dict[str, Any]:
         stats["hit_max_tokens_rate"] = 0.0
 
     if "meets_a1_criteria" in df.columns:
-        a1_pass = int(df["meets_a1_criteria"].sum())
+        a1_flags = coerce_bool_series(df["meets_a1_criteria"])
+        a1_pass = int(a1_flags.sum())
         stats["a1_pass_count"] = a1_pass
         stats["a1_pass_rate"] = float(a1_pass / len(df)) if len(df) else 0.0
         if not successful.empty:
             stats["a1_pass_rate_given_valid"] = float(
-                successful["meets_a1_criteria"].sum() / len(successful)
+                coerce_bool_series(successful["meets_a1_criteria"]).sum()
+                / len(successful)
             )
 
     for col in NUMERIC_SUMMARY_COLUMNS:
@@ -234,7 +238,8 @@ def compute_summary_stats(
         return {}
 
     df = pd.DataFrame([r.to_dict() for r in results])
-    successful_df = df[df["generation_successful"] == True]  # noqa: E712
+    success_flags = coerce_bool_series(df["generation_successful"])
+    successful_df = df.loc[success_flags]
 
     summary: Dict[str, Any] = {"overall": {}, "by_config": {}, "metadata": {}}
 
@@ -266,7 +271,7 @@ def compute_summary_stats(
         "configs_tested": int(df["config_name"].nunique()),
     }
     if "hit_max_tokens" in df.columns:
-        maxed = int(df["hit_max_tokens"].fillna(False).astype(bool).sum())
+        maxed = int(coerce_bool_series(df["hit_max_tokens"]).sum())
         summary["metadata"]["hit_max_tokens_count"] = maxed
         summary["metadata"]["hit_max_tokens_rate"] = (
             float(maxed / len(df)) if len(df) else 0.0
@@ -275,9 +280,10 @@ def compute_summary_stats(
         summary["metadata"]["models_tested"] = df["model"].unique().tolist()
 
     if "meets_a1_criteria" in df.columns:
-        summary["metadata"]["a1_pass_experiments"] = int(df["meets_a1_criteria"].sum())
+        a1_flags = coerce_bool_series(df["meets_a1_criteria"])
+        summary["metadata"]["a1_pass_experiments"] = int(a1_flags.sum())
         summary["metadata"]["a1_pass_rate"] = float(
-            df["meets_a1_criteria"].sum() / len(df)
+            a1_flags.sum() / len(df)
         ) if len(df) else 0.0
 
     return summary
@@ -431,7 +437,12 @@ class RunStore:
         full_path = self.run_dir(run_id) / "full.csv"
         if not full_path.exists():
             raise FileNotFoundError(f"full.csv not found for run: {run_id}")
-        return pd.read_csv(full_path)
+        try:
+            return pd.read_csv(full_path)
+        except pd.errors.EmptyDataError as exc:
+            raise ValueError(
+                f"full.csv is empty (no header/columns) for run: {run_id}"
+            ) from exc
 
     def write_full_csv(self, run_id: str, df: pd.DataFrame) -> Path:
         """Overwrite full.csv in a run bundle."""

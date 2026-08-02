@@ -11,6 +11,10 @@ from typing import Any, Dict, List, Optional, Sequence, Union
 
 import pandas as pd
 
+from slm_experiments.core.bool_series import (
+    coerce_bool,
+    coerce_bool_series as _bool_series,
+)
 from slm_experiments.core.config_label import config_label
 from slm_experiments.core.run_store import (
     KIND_ASSESSMENT,
@@ -144,12 +148,8 @@ def probe_code_revision(repo_root: Optional[Union[Path, str]] = None) -> Dict[st
         return empty
 
 
-def _bool_series(series: pd.Series) -> pd.Series:
-    return series.fillna(False).astype(bool)
-
-
 def _is_scorable_row(row: pd.Series) -> bool:
-    successful = bool(row.get("generation_successful", False))
+    successful = coerce_bool(row.get("generation_successful", False))
     cleaned = row.get("cleaned_response", "")
     if cleaned is None or (isinstance(cleaned, float) and pd.isna(cleaned)):
         cleaned = ""
@@ -472,7 +472,7 @@ class AssessmentBundler:
 
             raw_a1 = row.get("meets_a1_criteria", pd.NA)
             try:
-                meets_a1: Any = pd.NA if pd.isna(raw_a1) else bool(raw_a1)
+                meets_a1: Any = pd.NA if pd.isna(raw_a1) else coerce_bool(raw_a1)
             except (TypeError, ValueError):
                 meets_a1 = pd.NA
 
@@ -484,8 +484,10 @@ class AssessmentBundler:
                     "model": row.get("model", ""),
                     "config": row.get("config", ""),
                     "prompt_id": row.get("prompt_id", ""),
-                    "generation_successful": bool(row.get("generation_successful", False)),
-                    "hit_max_tokens": bool(row.get("hit_max_tokens", False)),
+                    "generation_successful": coerce_bool(
+                        row.get("generation_successful", False)
+                    ),
+                    "hit_max_tokens": coerce_bool(row.get("hit_max_tokens", False)),
                     "in_sample": in_sample,
                     "inclusion_probability": inclusion_probability,
                     "weight_factor": row.get("weight_factor", pd.NA),

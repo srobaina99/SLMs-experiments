@@ -132,6 +132,12 @@ class TestConfidenceMax:
         assert best["label"] == "A2"
         assert best["key"] == "doc_en"
 
+    def test_empty_members_raises(self):
+        with pytest.raises(
+            ValueError, match="confidence-max requires at least one member prediction"
+        ):
+            aggregate_confidence_max([])
+
 
 class TestDisagreement:
     def test_flag_true_when_labels_differ(self):
@@ -527,6 +533,43 @@ class TestAssessmentSummary:
         assert set(dims) == set(summary["metadata"]["sweep_values"].keys())
         assert "by_weight_factor" in summary
         assert "by_num_shots" in summary
+
+    def test_summary_missing_status_column_soft_degrades(self):
+        """Absent cefr_tsar_status must not IndexError; treat as unscored."""
+        scores = pd.DataFrame(
+            [
+                {
+                    "item_id": "i1",
+                    "cefr_tsar_ensemble_ordinal": 1,
+                    "cefr_tsar_ensemble_label": "A1",
+                    "cefr_tsar_disagrees_with_cefr_sp": False,
+                },
+            ]
+        )
+        item_map = pd.DataFrame(
+            [
+                {
+                    "item_id": "i1",
+                    "model": "Qwen3",
+                    "generation_successful": True,
+                    "hit_max_tokens": False,
+                    "in_sample": True,
+                },
+                {
+                    "item_id": "",
+                    "model": "Qwen3",
+                    "generation_successful": False,
+                    "hit_max_tokens": False,
+                    "in_sample": False,
+                },
+            ]
+        )
+        summary = compute_tsar_assessment_summary(scores, item_map)
+        overall = summary["overall"]
+        assert overall["generation_failure_rate"] == pytest.approx(0.5)
+        assert overall["cefr_tsar_scored_count"] == 0
+        assert overall["cefr_tsar_mean_ordinal"] is None
+        assert overall["cefr_tsar_predicted_a1_rate"] is None
 
 
 class TestBundleIntegration:

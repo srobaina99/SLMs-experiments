@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional, Sequence, Union
 
 import pandas as pd
 
+from slm_experiments.core.bool_series import coerce_bool_series
 from slm_experiments.core.run_store import KIND_ASSESSMENT, RunStore
 from slm_experiments.human.rubric import (
     NOTES_COLUMN,
@@ -288,7 +289,7 @@ def build_item_frame(
 
     in_sample = item_map.copy()
     if "in_sample" in in_sample.columns:
-        in_sample = in_sample[in_sample["in_sample"].fillna(False).astype(bool)]
+        in_sample = in_sample[coerce_bool_series(in_sample["in_sample"])]
     in_sample = in_sample[in_sample["item_id"].astype(str).str.strip() != ""]
     if in_sample.empty:
         # Fall back to items.csv ids alone (map may omit in_sample).
@@ -314,7 +315,11 @@ def build_item_frame(
         models = sorted({str(m) for m in group["model"].tolist()})
         arms = sorted({arm_label(row) for _, row in group.iterrows()})
         configs = sorted({str(c) for c in group.get("config", pd.Series(dtype=str)).tolist()})
-        truncated = bool(group.get("hit_max_tokens", pd.Series(dtype=bool)).fillna(False).any())
+        truncated = bool(
+            coerce_bool_series(
+                group.get("hit_max_tokens", pd.Series(dtype=bool))
+            ).any()
+        )
 
         score = score_by_id.get(item_id)
         if score is not None:

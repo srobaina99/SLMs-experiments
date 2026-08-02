@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import pandas as pd
 
+from slm_experiments.core.bool_series import coerce_bool_series as _bool_series
 from slm_experiments.evaluation.assessment.scorers import (
     ensure_scorer_registered,
     register_scorer,
@@ -252,7 +253,9 @@ def predict_member_labels(
                     model=spec["model_id"],
                     revision=spec["revision"],
                     device=pipe_device,
-                    dtype="auto",
+                    # torch_dtype (not dtype): on transformers 4.55.x, pipeline
+                    # dtype= leaks into tokenizer.encode and raises TypeError.
+                    torch_dtype="auto",
                     model_kwargs={"attn_implementation": attn},
                 ),
             )
@@ -433,10 +436,6 @@ def tsar_scorer_revision() -> Dict[str, Any]:
     }
 
 
-def _bool_series(series: pd.Series) -> pd.Series:
-    return series.fillna(False).astype(bool)
-
-
 def _format_sweep_key(column: str, value: Any) -> str:
     if column in ("beam_width", "kvl_beam_width", "num_shots", "guided_top_k"):
         return str(int(value))
@@ -477,7 +476,13 @@ def _tsar_metric_block(
     merged = in_sample.merge(scores_df, on="item_id", how="left")
     # Dedup to unique items for item-level TSAR rates (shared texts).
     item_level = merged.drop_duplicates(subset=["item_id"], keep="first")
-    ok = item_level[item_level.get("cefr_tsar_status", pd.Series(dtype=str)) == STATUS_OK]
+    if "cefr_tsar_status" not in item_level.columns:
+        stats["cefr_tsar_mean_ordinal"] = None
+        stats["cefr_tsar_predicted_a1_rate"] = None
+        stats["cefr_tsar_disagreement_rate"] = None
+        stats["cefr_tsar_scored_count"] = 0
+        return stats
+    ok = item_level[item_level["cefr_tsar_status"] == STATUS_OK]
     stats["cefr_tsar_scored_count"] = int(len(ok))
     if ok.empty:
         stats["cefr_tsar_mean_ordinal"] = None
@@ -495,7 +500,7 @@ def _tsar_metric_block(
     disag = ok["cefr_tsar_disagrees_with_cefr_sp"]
     disag_known = disag.dropna()
     stats["cefr_tsar_disagreement_rate"] = (
-        float(disag_known.astype(bool).mean()) if len(disag_known) else None
+        float(_bool_series(disag_known).mean()) if len(disag_known) else None
     )
     return stats
 

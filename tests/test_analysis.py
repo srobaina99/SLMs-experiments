@@ -241,6 +241,29 @@ class TestPercentileBootstrap:
         assert ci_excludes_zero(hard["ci_low"], hard["ci_high"]) is True
         assert direction_from_ci(hard["ci_low"], hard["ci_high"]) == "harder"
 
+    def test_empty_singleton_and_nonpositive_resamples(self):
+        from slm_experiments.evaluation.assessment.analysis import (
+            ci_excludes_zero,
+            direction_from_ci,
+            percentile_bootstrap_ci,
+        )
+
+        empty = percentile_bootstrap_ci([], n_resamples=100)
+        assert np.isnan(empty["point_estimate"])
+        assert np.isnan(empty["ci_low"]) and np.isnan(empty["ci_high"])
+        assert ci_excludes_zero(empty["ci_low"], empty["ci_high"]) is False
+        assert direction_from_ci(empty["ci_low"], empty["ci_high"]) == "none"
+
+        all_nan = percentile_bootstrap_ci([np.nan, np.nan], n_resamples=100)
+        assert np.isnan(all_nan["point_estimate"])
+
+        alone = percentile_bootstrap_ci([1.5], n_resamples=500)
+        assert alone == {"point_estimate": 1.5, "ci_low": 1.5, "ci_high": 1.5}
+
+        zero_resamples = percentile_bootstrap_ci([1.0, 2.0], n_resamples=0)
+        assert zero_resamples["point_estimate"] == pytest.approx(1.5)
+        assert zero_resamples["ci_low"] == zero_resamples["ci_high"] == pytest.approx(1.5)
+
     def test_group_seed_independent_of_other_groups(self):
         """Adding an unrelated group must not change an existing group's CI."""
         from slm_experiments.evaluation.assessment.analysis import (
@@ -279,6 +302,16 @@ class TestPercentileBootstrap:
         )
 
         assert alone == with_extra
+
+    def test_ci_excludes_zero_false_for_none_bounds(self):
+        """None CI bounds (n_pairs=0 path) must not raise or claim excludes-zero."""
+        from slm_experiments.evaluation.assessment.analysis import (
+            ci_excludes_zero,
+            direction_from_ci,
+        )
+
+        assert ci_excludes_zero(None, None) is False  # type: ignore[arg-type]
+        assert direction_from_ci(None, None) == "none"  # type: ignore[arg-type]
 
 
 class TestFamilyAwareArm:
@@ -414,6 +447,96 @@ class TestPairedDeltaConstruction:
         # p02 missing intervention value, p03 missing baseline value + no int row.
         assert int(pairs["n_pairs_dropped"].iloc[0]) == 2
 
+    def test_conflicting_duplicate_prompt_raises(self):
+        from slm_experiments.evaluation.assessment.analysis import (
+            build_paired_deltas,
+        )
+
+        baseline = pd.DataFrame(
+            {
+                "prompt_id": ["p01", "p01"],
+                "cefr_sp_level_ordinal": [2.0, 4.0],
+            }
+        )
+        intervention = pd.DataFrame(
+            {"prompt_id": ["p01"], "cefr_sp_level_ordinal": [1.0]}
+        )
+        with pytest.raises(ValueError, match="Conflicting cefr_sp_level_ordinal"):
+            build_paired_deltas(
+                baseline,
+                intervention,
+                value_col="cefr_sp_level_ordinal",
+            )
+
+    def test_identical_duplicate_prompt_keeps_one(self):
+        from slm_experiments.evaluation.assessment.analysis import (
+            build_paired_deltas,
+        )
+
+        baseline = pd.DataFrame(
+            {
+                "prompt_id": ["p01", "p01"],
+                "cefr_sp_level_ordinal": [2.0, 2.0],
+            }
+        )
+        intervention = pd.DataFrame(
+            {"prompt_id": ["p01"], "cefr_sp_level_ordinal": [1.0]}
+        )
+        pairs = build_paired_deltas(
+            baseline,
+            intervention,
+            value_col="cefr_sp_level_ordinal",
+        )
+        assert len(pairs) == 1
+        assert pairs["delta"].iloc[0] == pytest.approx(-1.0)
+
+    def test_status_gating_excludes_non_ok_scores(self):
+        from slm_experiments.evaluation.assessment.paired_deltas import (
+            _metric_frame,
+        )
+
+        map_rows = pd.DataFrame(
+            {
+                "item_id": ["a", "b", "c"],
+                "prompt_id": ["p1", "p2", "p3"],
+                "in_sample": [True, True, True],
+            }
+        )
+        scores = pd.DataFrame(
+            {
+                "item_id": ["a", "b", "c"],
+                "cefr_tsar_ensemble_ordinal": [1.0, 2.0, 3.0],
+                "cefr_tsar_status": ["ok", "error", "missing"],
+                "kvl_v2_mean_score": [0.1, 0.2, 0.3],
+                "kvl_v2_status": ["ok", "error", "ok"],
+            }
+        )
+        tsar = _metric_frame(map_rows, scores, "cefr_tsar_ensemble_ordinal")
+        assert list(tsar["prompt_id"]) == ["p1"]
+        kvl = _metric_frame(map_rows, scores, "kvl_v2_mean_score")
+        assert list(kvl["prompt_id"]) == ["p1", "p3"]
+
+    def test_missing_status_column_excludes_secondary_metric(self):
+        from slm_experiments.evaluation.assessment.paired_deltas import (
+            _metric_frame,
+        )
+
+        map_rows = pd.DataFrame(
+            {
+                "item_id": ["a"],
+                "prompt_id": ["p1"],
+                "in_sample": [True],
+            }
+        )
+        scores = pd.DataFrame(
+            {
+                "item_id": ["a"],
+                "cefr_tsar_ensemble_ordinal": [1.0],
+            }
+        )
+        tsar = _metric_frame(map_rows, scores, "cefr_tsar_ensemble_ordinal")
+        assert tsar.empty
+
     def test_easier_delta_orientation(self):
         from slm_experiments.evaluation.assessment.analysis import (
             easier_deltas,
@@ -426,6 +549,46 @@ class TestPairedDeltaConstruction:
         assert list(easier_deltas(raw, easier_orientation="higher")) == pytest.approx(
             [-1.0, -0.5]
         )
+
+    def test_nonfinite_values_dropped_from_pairs(self):
+        """±inf must not survive into n_pairs (inf−inf → NaN delta + fake CI)."""
+        from slm_experiments.evaluation.assessment.analysis import (
+            build_paired_deltas,
+        )
+
+        baseline = pd.DataFrame(
+            {
+                "prompt_id": ["p01", "p02"],
+                "val": [2.0, np.inf],
+            }
+        )
+        intervention = pd.DataFrame(
+            {
+                "prompt_id": ["p01", "p02"],
+                "val": [1.0, np.inf],
+            }
+        )
+        pairs = build_paired_deltas(baseline, intervention, value_col="val")
+        assert list(pairs["prompt_id"]) == ["p01"]
+        assert pairs["delta"].iloc[0] == pytest.approx(-1.0)
+        assert int(pairs["n_pairs_dropped"].iloc[0]) == 1
+
+    def test_stratum_rates_use_all_rows_as_denominator(self):
+        from slm_experiments.evaluation.assessment.paired_deltas import _stratum_rates
+
+        df = pd.DataFrame(
+            {
+                "generation_successful": [True, True, False, False],
+                "hit_max_tokens": [False, True, False, False],
+                "meets_a1_criteria": [True, False, False, False],
+            }
+        )
+        rates = _stratum_rates(df)
+        assert rates["count"] == 4
+        assert rates["generation_failure_rate"] == pytest.approx(0.5)
+        assert rates["hit_max_tokens_rate"] == pytest.approx(0.25)
+        # 1 A1 among 4 rows (not among 2 successes).
+        assert rates["a1_pass_rate"] == pytest.approx(0.25)
 
 
 # ---------------------------------------------------------------------------
@@ -446,6 +609,28 @@ class TestItemMapSchemaExtension:
 
 
 class TestAnalyzeBundle:
+    def test_analyze_rejects_generation_kind(self, tmp_path: Path):
+        from slm_experiments.evaluation.assessment.analysis import (
+            analyze_assessment_bundle,
+        )
+
+        pipeline = ExperimentPipeline()
+        result = pipeline.run(
+            "What is a friend?",
+            ExperimentConfig(
+                model_name="Qwen3",
+                config_weighting=False,
+                config_prompting=True,
+                prompt_id="p01",
+                weight_factor=1.0,
+            ),
+            MockSuccessModel(SIMPLE_RESPONSE),
+        )
+        store = RunStore(tmp_path)
+        gen_id = _write_generation_bundle(store, [result])
+        with pytest.raises(ValueError, match="not kind=assessment"):
+            analyze_assessment_bundle(gen_id, results_root=tmp_path)
+
     def test_writes_artifacts_and_manifest_analysis_block(self, tmp_path: Path):
         from slm_experiments.evaluation.assessment.analysis import (
             analyze_assessment_bundle,
@@ -803,6 +988,25 @@ class TestAdequacyNonInferiority:
         assert result["ci_high"] >= 0.5
         assert result["preserved"] is False
 
+    def test_n_pairs_zero_null_cis_not_preserved(self):
+        from slm_experiments.evaluation.assessment.analysis import (
+            adequacy_noninferiority,
+        )
+
+        result = adequacy_noninferiority(
+            [],
+            bootstrap_seed=42,
+            group_key="adequacy|empty|test",
+            n_resamples=100,
+            n_pairs_dropped=3,
+        )
+        assert result["n_pairs"] == 0
+        assert result["drop"] is None
+        assert result["ci_low"] is None
+        assert result["ci_high"] is None
+        assert result["preserved"] is False
+        assert result["n_pairs_dropped"] == 3
+
     def test_preserved_false_when_ci_high_equals_margin(self, monkeypatch):
         """Strict inequality: ci_high == 0.5 must not count as preserved."""
         import slm_experiments.evaluation.assessment.analysis as analysis_mod
@@ -847,6 +1051,40 @@ class TestAdequacyNonInferiority:
             values, n_resamples=800, ci=0.95, rng=group_bootstrap_rng(42, adequacy_key)
         )
         assert b == b2
+
+
+class TestTsarSuitableStatusGating:
+    def test_scorer_suitable_tsar_requires_ok_status(self):
+        from slm_experiments.evaluation.assessment.validation import (
+            _scorer_suitable_tsar,
+        )
+
+        ok = pd.Series(
+            {
+                "cefr_tsar_status": "ok",
+                "cefr_tsar_ensemble_label": "A1",
+            }
+        )
+        assert _scorer_suitable_tsar(ok) is True
+
+        error = pd.Series(
+            {
+                "cefr_tsar_status": "error",
+                "cefr_tsar_ensemble_label": "A1",
+            }
+        )
+        assert _scorer_suitable_tsar(error) is None
+
+        # Missing status column / null status must not treat a bare label as ok.
+        missing_col = pd.Series({"cefr_tsar_ensemble_label": "A1"})
+        assert _scorer_suitable_tsar(missing_col) is None
+        null_status = pd.Series(
+            {
+                "cefr_tsar_status": pd.NA,
+                "cefr_tsar_ensemble_label": "A1",
+            }
+        )
+        assert _scorer_suitable_tsar(null_status) is None
 
 
 def _attach_human_study(

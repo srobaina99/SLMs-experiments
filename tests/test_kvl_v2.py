@@ -351,6 +351,28 @@ class TestKvlV2AssessmentScorer:
         assert row2["kvl_v2_status"] == "missing"
         assert row2["kvl_v2_mean_score"] is None or pd.isna(row2["kvl_v2_mean_score"])
 
+    def test_compute_exception_writes_error_status(self, fixture_lookup):
+        items = pd.DataFrame(
+            [
+                {
+                    "item_id": "i1",
+                    "cleaned_response": "A friend is a person you like.",
+                }
+            ]
+        )
+        with patch(
+            "slm_experiments.evaluation.assessment.kvl_v2.KvlLookup",
+            return_value=fixture_lookup,
+        ), patch(
+            "slm_experiments.evaluation.assessment.kvl_v2.compute_kvl_v2_metrics",
+            side_effect=RuntimeError("lookup boom"),
+        ):
+            scored = score_kvl_v2(items)
+
+        row = scored.iloc[0]
+        assert row["kvl_v2_status"] == "error"
+        assert "lookup boom" in str(row["kvl_v2_error"])
+
     def test_kvl_l1_column_ignored_always_es(self, fixture_lookup):
         """Assessment KVL v2 is fixed to Spanish; kvl_l1 on items is ignored."""
         items = pd.DataFrame(

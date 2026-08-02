@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, Literal, Optional
 import numpy as np
 import pandas as pd
 
+from slm_experiments.core.bool_series import coerce_bool_series as _bool_series
 from slm_experiments.human.study_export import parse_experiment_family
 
 DEFAULT_BOOTSTRAP_SEED = 42
@@ -159,8 +160,6 @@ def group_bootstrap_rng(bootstrap_seed: int, group_key: str) -> np.random.Genera
     entropy = [int.from_bytes(digest[i : i + 4], "little") for i in range(0, 32, 4)]
     return np.random.default_rng(np.random.SeedSequence(entropy))
 
-def _bool_series(series: pd.Series) -> pd.Series:
-    return series.fillna(False).astype(bool)
 
 def _percentile_from_replicates(
     replicates: np.ndarray,

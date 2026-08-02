@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 import numpy as np
 import pandas as pd
 
+from slm_experiments.core.bool_series import coerce_bool_series
 from slm_experiments.evaluation.assessment.analysis_helpers import (
     ADEQUACY_GROUP_KEY_PREFIX,
     ADEQUACY_MARGIN,
@@ -555,7 +556,8 @@ def _scorer_suitable_cefr_sp(row: pd.Series) -> Optional[bool]:
 
 def _scorer_suitable_tsar(row: pd.Series) -> Optional[bool]:
     status = row.get("cefr_tsar_status")
-    if not _is_missing(status) and str(status) != "ok":
+    # Require explicit ok; missing/null status must not treat a bare label as ok.
+    if _is_missing(status) or str(status) != "ok":
         return None
     label = row.get("cefr_tsar_ensemble_label")
     if _is_missing(label):
@@ -644,8 +646,8 @@ def _build_scorer_validation(
     human_adeq = pd.to_numeric(working[ANSWER_ADEQUACY], errors="coerce").to_numpy(
         dtype=float
     )
-    human_bin = working["human_suitable"].astype(bool).to_numpy()
-    scorer_bin = working[suitable_col].astype(bool).to_numpy()
+    human_bin = coerce_bool_series(working["human_suitable"]).to_numpy()
+    scorer_bin = coerce_bool_series(working[suitable_col]).to_numpy()
     weights = (
         pd.to_numeric(working["inclusion_weight"], errors="coerce")
         .fillna(1.0)

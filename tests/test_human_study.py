@@ -629,6 +629,119 @@ class TestStudyExportImport:
         stored = pd.read_csv(study_dir / "ratings.csv")
         assert len(stored) == 2
 
+    def test_export_rejects_generation_kind(self, tmp_path: Path):
+        pipeline = ExperimentPipeline()
+        result = pipeline.run(
+            "What is a friend?",
+            ExperimentConfig(
+                model_name="Qwen3",
+                config_weighting=False,
+                config_prompting=True,
+                prompt_id="p01",
+                weight_factor=1.0,
+            ),
+            MockSuccessModel(SIMPLE_RESPONSE),
+        )
+        store = RunStore(tmp_path)
+        gen_id = _write_generation_bundle(store, [result])
+        with pytest.raises(ValueError, match="not an assessment bundle"):
+            StudyExporter(results_root=tmp_path).export(
+                gen_id, sample=1, calibration=0, seed=1, raters=("r1",)
+            )
+
+    def test_export_calibration_exhausts_pool(self, tmp_path: Path):
+        assess_id, store = _build_assessment_bundle(tmp_path)
+        n_items = len(store.read_items_csv(assess_id))
+        assert n_items > 0
+        with pytest.raises(
+            ValueError, match="No items left for analysis sample after excluding"
+        ):
+            StudyExporter(results_root=tmp_path).export(
+                assess_id,
+                sample=1,
+                calibration=n_items,
+                seed=1,
+                raters=("r1",),
+            )
+
+    def test_export_rejects_empty_raters_and_bad_sizes(self, tmp_path: Path):
+        assess_id, _ = _build_assessment_bundle(tmp_path)
+        exporter = StudyExporter(results_root=tmp_path)
+        with pytest.raises(ValueError, match="sample size must be positive"):
+            exporter.export(
+                assess_id, sample=0, calibration=0, seed=1, raters=("r1",)
+            )
+        with pytest.raises(ValueError, match="calibration size must be >= 0"):
+            exporter.export(
+                assess_id, sample=1, calibration=-1, seed=1, raters=("r1",)
+            )
+        with pytest.raises(ValueError, match="at least one rater id is required"):
+            exporter.export(assess_id, sample=1, calibration=0, seed=1, raters=())
+
+    def test_import_rejects_unknown_item_id(self, tmp_path: Path):
+        assess_id, _ = _build_assessment_bundle(tmp_path)
+        study_dir, _ = StudyExporter(results_root=tmp_path).export(
+            assess_id, sample=2, calibration=0, seed=1, raters=("r1",)
+        )
+        bad = pd.DataFrame(
+            [
+                {
+                    "item_id": "not-a-real-item",
+                    "rater_id": "r1",
+                    **{d: 3 for d in RATING_DIMENSIONS},
+                }
+            ]
+        )
+        bad_path = study_dir / "bad_ratings.csv"
+        bad.to_csv(bad_path, index=False)
+        with pytest.raises(ValueError, match="unknown item_id"):
+            StudyImporter(results_root=tmp_path).import_ratings(assess_id, bad_path)
+
+    def test_import_merges_second_rater_until_consensus(self, tmp_path: Path):
+        assess_id, _ = _build_assessment_bundle(tmp_path)
+        study_dir, _ = StudyExporter(results_root=tmp_path).export(
+            assess_id, sample=2, calibration=0, seed=7, raters=("r1", "r2")
+        )
+        item_ids = pd.read_csv(study_dir / "analysis_items.csv")["item_id"].tolist()
+
+        first = pd.DataFrame(
+            [
+                {
+                    "item_id": item_id,
+                    "rater_id": "r1",
+                    **{d: 3 for d in RATING_DIMENSIONS},
+                }
+                for item_id in item_ids
+            ]
+        )
+        first_path = tmp_path / "rater1.csv"
+        first.to_csv(first_path, index=False)
+        importer = StudyImporter(results_root=tmp_path)
+        partial = importer.import_ratings(assess_id, first_path)
+        assert partial["n_items_consensus"] == 0
+        assert partial["n_items_incomplete"] == 2
+
+        second = pd.DataFrame(
+            [
+                {
+                    "item_id": item_id,
+                    "rater_id": "r2",
+                    **{d: 4 for d in RATING_DIMENSIONS},
+                }
+                for item_id in item_ids
+            ]
+        )
+        second_path = tmp_path / "rater2.csv"
+        second.to_csv(second_path, index=False)
+        complete = importer.import_ratings(assess_id, second_path)
+        assert complete["n_ratings"] == 4
+        assert complete["n_raters"] == 2
+        assert complete["n_items_consensus"] == 2
+        assert complete["n_items_incomplete"] == 0
+        consensus = pd.read_csv(study_dir / "consensus.csv")
+        assert len(consensus) == 2
+        assert "human_suitable" in consensus.columns
+
 
 class TestCliStudyDispatch:
     @patch("slm_experiments.human.study_export.StudyExporter")

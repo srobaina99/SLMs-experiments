@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
+from slm_experiments.core.bool_series import coerce_bool_series as _bool_series
 from slm_experiments.evaluation.assessment.scorers import (
     ensure_scorer_registered,
     register_scorer,
@@ -165,10 +166,6 @@ def kvl_v2_scorer_revision() -> Dict[str, Any]:
             "KVL beam decoding is unchanged."
         ),
     }
-
-
-def _bool_series(series: pd.Series) -> pd.Series:
-    return series.fillna(False).astype(bool)
 
 
 def _format_sweep_key(column: str, value: Any) -> str:
