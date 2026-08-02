@@ -6,6 +6,10 @@ import argparse
 import sys
 from pathlib import Path
 
+from slm_experiments.evaluation.assessment.cefr_tsar import (
+    DEFAULT_BATCH_SIZE as TSAR_DEFAULT_BATCH_SIZE,
+)
+
 _EPILOG = """
 Quick start
   slm_experiments phase1
@@ -429,6 +433,11 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="IDS",
         help="Comma-separated rater ids (default: %(default)s)",
     )
+    human_study_export.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite study/ even if imported ratings already exist",
+    )
     human_study_import = human_sub.add_parser(
         "study-import",
         help="Import long-format (or single-sheet) ratings into the study bundle",
@@ -505,6 +514,19 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Random seed for item sampling (default: %(default)s)",
     )
     assess_build.add_argument(
+        "--cefr-tsar-device",
+        default=None,
+        metavar="DEVICE",
+        help="Torch device for TSAR scoring (default: auto-detect)",
+    )
+    assess_build.add_argument(
+        "--cefr-tsar-batch-size",
+        type=int,
+        default=TSAR_DEFAULT_BATCH_SIZE,
+        metavar="N",
+        help="Batch size for TSAR classifiers (default: %(default)s)",
+    )
+    assess_build.add_argument(
         "--no-plot",
         action="store_true",
         help="No-op for ClusterUY parity (assess never plots)",
@@ -551,6 +573,11 @@ def _build_parser() -> argparse.ArgumentParser:
         required=True,
         metavar="ID",
         help="Assessment bundle id under results/runs/",
+    )
+    assess_judge_export.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite judge/ even if imported judge_scores.csv already exists",
     )
 
     assess_judge_import = assess_sub.add_parser(
@@ -729,6 +756,7 @@ def main(argv: list[str] | None = None) -> None:
             calibration=args.calibration,
             seed=args.seed,
             raters=rater_ids,
+            force=args.force,
         )
         print(f"Study export complete: {n_items} analysis items")
         print(f"Output: {study_dir.resolve()}")
@@ -747,6 +775,13 @@ def main(argv: list[str] | None = None) -> None:
             f"Imported {summary['n_ratings']} ratings "
             f"({summary['n_items']} items, {summary['n_raters']} raters)"
         )
+        if summary.get("n_items_consensus") is not None:
+            print(
+                f"Consensus items: {summary['n_items_consensus']} "
+                f"(incomplete: {summary.get('n_items_incomplete', 0)})"
+            )
+        if summary.get("warning"):
+            print(f"Warning: {summary['warning']}")
         print(f"Ratings: {summary['ratings_path'].resolve()}")
         print(f"Reliability: {summary['reliability_path'].resolve()}")
         return
@@ -761,6 +796,8 @@ def main(argv: list[str] | None = None) -> None:
             sample=args.sample,
             seed=args.seed,
             cli_args=cli_args,
+            cefr_tsar_device=args.cefr_tsar_device,
+            cefr_tsar_batch_size=args.cefr_tsar_batch_size,
         )
         print(f"Assessment bundle complete: {run_id}")
         print(f"Output: {Path(out_dir).resolve()}")
@@ -783,7 +820,10 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "assess" and args.assess_cmd == "judge-export":
         from slm_experiments.evaluation.assessment.judge import JudgeExporter
 
-        judge_dir, n_items = JudgeExporter().export(args.assessment_run_id)
+        judge_dir, n_items = JudgeExporter().export(
+            args.assessment_run_id,
+            force=args.force,
+        )
         print(f"Exported {n_items} judge-input items")
         print(f"Judge dir: {judge_dir.resolve()}")
         return
@@ -795,10 +835,18 @@ def main(argv: list[str] | None = None) -> None:
             args.assessment_run_id,
             args.scores,
         )
-        print(
-            f"Imported {summary['n_scores']} judge scores "
-            f"({summary['n_items']} items)"
+        coverage = (
+            f"{summary['n_items']}/{summary['n_items_expected']} items"
+            if "n_items_expected" in summary
+            else f"{summary['n_items']} items"
         )
+        print(f"Imported {summary['n_scores']} judge scores ({coverage})")
+        if summary.get("coverage_complete") is False:
+            print(
+                "WARNING: partial judge coverage — "
+                f"scores cover {summary['n_items']} of "
+                f"{summary['n_items_expected']} expected items"
+            )
         print(f"Scores: {summary['scores_path'].resolve()}")
         return
 
@@ -913,7 +961,8 @@ def _print_assessment_run(manifest: dict, summary: dict | None = None) -> None:
             f"mean_ordinal={overall.get('cefr_tsar_mean_ordinal')}, "
             f"predicted_a1_rate={overall.get('cefr_tsar_predicted_a1_rate')}, "
             f"disagreement_rate={overall.get('cefr_tsar_disagreement_rate')} | "
-            f"failure_rate={overall.get('generation_failure_rate')}"
+            f"failure_rate={overall.get('generation_failure_rate')}, "
+            f"hit_max_tokens_rate={overall.get('hit_max_tokens_rate')}"
         )
     if manifest.get("cli_args"):
         print(f"CLI args: {' '.join(manifest['cli_args'])}")
@@ -975,6 +1024,7 @@ def _print_generation_run(manifest: dict, summary: dict) -> None:
             fk = group_stats.get("flesch_kincaid_grade", {}).get("mean")
             a1 = group_stats.get("a1_pass_rate")
             fail = group_stats.get("generation_failure_rate")
+            maxed = group_stats.get("hit_max_tokens_rate")
             extras = []
             if fk is not None:
                 extras.append(f"FK mean={fk:.2f}")
@@ -982,6 +1032,8 @@ def _print_generation_run(manifest: dict, summary: dict) -> None:
                 extras.append(f"a1_pass_rate={a1:.2f}")
             if fail is not None:
                 extras.append(f"failure_rate={fail:.2f}")
+            if maxed is not None:
+                extras.append(f"maxed_out_rate={maxed:.2f}")
             suffix = f", {', '.join(extras)}" if extras else ""
             print(f"  {group_name}: n={count}{suffix}")
 
@@ -992,11 +1044,14 @@ def _print_generation_run(manifest: dict, summary: dict) -> None:
             count = model_stats.get("count", 0)
             a1 = model_stats.get("a1_pass_rate")
             fail = model_stats.get("generation_failure_rate")
+            maxed = model_stats.get("hit_max_tokens_rate")
             parts = [f"n={count}"]
             if a1 is not None:
                 parts.append(f"a1_pass_rate={a1:.2f}")
             if fail is not None:
                 parts.append(f"failure_rate={fail:.2f}")
+            if maxed is not None:
+                parts.append(f"maxed_out_rate={maxed:.2f}")
             print(f"  {model_name}: {', '.join(parts)}")
             nested_sweep = model_stats.get(sweep_section or "", {})
             if nested_sweep:
@@ -1005,11 +1060,14 @@ def _print_generation_run(manifest: dict, summary: dict) -> None:
                     g_a1 = group_stats.get("a1_pass_rate")
                     g_fk = group_stats.get("flesch_kincaid_grade", {}).get("mean")
                     g_fail = group_stats.get("generation_failure_rate")
+                    g_maxed = group_stats.get("hit_max_tokens_rate")
                     g_parts = [f"n={g_count}"]
                     if g_a1 is not None:
                         g_parts.append(f"a1_pass_rate={g_a1:.2f}")
                     if g_fail is not None:
                         g_parts.append(f"failure_rate={g_fail:.2f}")
+                    if g_maxed is not None:
+                        g_parts.append(f"maxed_out_rate={g_maxed:.2f}")
                     if g_fk is not None:
                         g_parts.append(f"FK mean={g_fk:.2f}")
                     print(f"    {group_name}: {', '.join(g_parts)}")
@@ -1020,11 +1078,14 @@ def _print_generation_run(manifest: dict, summary: dict) -> None:
                     c_a1 = config_stats.get("a1_pass_rate")
                     c_fk = config_stats.get("flesch_kincaid_grade", {}).get("mean")
                     c_fail = config_stats.get("generation_failure_rate")
+                    c_maxed = config_stats.get("hit_max_tokens_rate")
                     c_parts = [f"n={c_count}"]
                     if c_a1 is not None:
                         c_parts.append(f"a1_pass_rate={c_a1:.2f}")
                     if c_fail is not None:
                         c_parts.append(f"failure_rate={c_fail:.2f}")
+                    if c_maxed is not None:
+                        c_parts.append(f"maxed_out_rate={c_maxed:.2f}")
                     if c_fk is not None:
                         c_parts.append(f"FK mean={c_fk:.2f}")
                     print(f"    {config_name}: {', '.join(c_parts)}")

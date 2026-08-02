@@ -34,7 +34,7 @@ The framework is a solid engineering setup for comparing inference-time interven
 
 | Experiment                | Config factory                                | Runner                              | Assessment                           |
 | ------------------------- | --------------------------------------------- | ----------------------------------- | ------------------------------------ |
-| Phase 1 factorial         | `src/slm_experiments/phase1/configs.py`       | `phase1/runner.py`                  | Sound 2×2; strongest causal design   |
+| Phase 1 factorial         | `src/slm_experiments/phase1/configs.py`       | `phase1/runner.py`                  | Implemented; **not in thesis scope** |
 | Phase 2 weights           | `phase2/weights.py` (`create_weight_configs`) | same                                | Valid as “both ON, vary w”           |
 | Phase 2 prompting         | `phase2/prompting.py`                         | same                                | Cleanest Phase 2 sweep               |
 | Phase 2 guided            | `phase2/guided.py`                            | same                                | Implemented; in-run baseline `k0`    |
@@ -44,7 +44,7 @@ The framework is a solid engineering setup for comparing inference-time interven
 
 Shared defaults live in `src/slm_experiments/core/config.py` (`temperature=0.0`, `top_k=50`, `max_new_tokens=200`). CLI entry: `src/slm_experiments/cli.py`.
 
-**Bottom line:** Phase 1 and Phase 2 prompting are closest to thesis-ready. Weight sweep needs clearer framing; guided and KVL now include in-run baselines. Readability pass rates are a useful **proxy**, not proof of CEFR A1 competence.
+**Thesis scope (2026-07-12):** Phase 2 only. Phase 1 code remains for optional follow-up but will **not** be run or cited for the master thesis. Formal Phase 2 claims use `--prompts all` (25 prompts); the CLI default `n=3` is a smoke-test guardrail only. The primary binary outcome is **CEFR-SP document-level A1** (`meets_a1_criteria`); FK / Fog / Spache are descriptive only — not proof of CEFR A1 competence.
 
 ---
 
@@ -54,9 +54,11 @@ Shared defaults live in `src/slm_experiments/core/config.py` (`temperature=0.0`,
 
 
 
-### 1. Run formal claims with `--prompts all` (25 prompts) *DONE* *nothing to do*
+### 1. Run formal claims with `--prompts all` (25 prompts) *DONE*
 
-**Why.** The CLI default of 3 prompts is intentional for smoke tests (48 Phase 1 observations). That sample is too small for stable pass rates or intervention effect sizes. Under greedy decoding the prompt set is the only within-condition variance source.
+**Why.** The CLI default of 3 prompts is an intentional **smoke-test guardrail** so accidental full launches do not burn cluster time. That sample is too small for stable pass rates. Under greedy decoding the prompt set is the only within-condition variance source.
+
+**Status (2026-07-12):** Thesis policy is clear — all cited Phase 2 results use `--prompts all`. Cluster scripts already pass it. Default `n=3` stays in runners/CLI as a guardrail; no further code change required.
 
 **Files involved**
 
@@ -64,26 +66,18 @@ Shared defaults live in `src/slm_experiments/core/config.py` (`temperature=0.0`,
 | File                                      | Role                                                                |
 | ----------------------------------------- | ------------------------------------------------------------------- |
 | `src/slm_experiments/core/prompts.py`     | `STANDARD_PROMPTS` — the 25 CEFR-themed items                       |
-| `src/slm_experiments/phase1/runner.py`    | `parse_prompts()`, default `prompts="3"` in `FactorialRunner.run()` |
-| `src/slm_experiments/phase2/weights.py`   | Same default on `WeightSweepRunner.run()`                           |
-| `src/slm_experiments/phase2/prompting.py` | Same on `PromptingSweepRunner.run()`                                |
-| `src/slm_experiments/phase2/guided.py`    | Same on `GuidedSweepRunner.run()`                                   |
-| `src/slm_experiments/phase2/kvl_beam.py`  | Same on `KvlBeamSweepRunner.run()`                                  |
+| `src/slm_experiments/phase2/*.py`         | Default `prompts="3"` on sweep runners (smoke guard)                |
 | `src/slm_experiments/cli.py`              | `--prompts` argument defaults                                       |
-| `scripts/clusteruy/run_phase2_*.sh`       | Cluster jobs (prefer `--prompts all` for formal runs)               |
+| `scripts/clusteruy/run_phase2_*.sh`       | Formal jobs use `--prompts all`                                     |
 | `ExperimentDesign.md`                     | Documents 3 vs 25 observation counts                                |
 
 
-**What to modify / do**
-
-- **Usage (no code change required for claims):** always pass `--prompts all` for published results.
-- **Docs:** keep the n=3 default in runners/CLI as a smoke guard; in `ExperimentDesign.md` and the thesis, state that n=3 is development-only.
-- **Cluster:** ensure `scripts/clusteruy/run_phase2_weights.sh`, `run_phase2_prompting.sh`, `run_phase2_kvl_beam.sh` (and any guided job you add) use `--prompts all`.
-
 ```bash
-python -m slm_experiments phase1 --prompts all
+# Formal / thesis (Phase 2 only)
 python -m slm_experiments phase2 weights --prompts all
-# … prompting, guided, kvl_beam
+python -m slm_experiments phase2 prompting --prompts all
+python -m slm_experiments phase2 guided --prompts all
+python -m slm_experiments phase2 kvl_beam --prompts all
 ```
 
 ---
@@ -149,8 +143,7 @@ python -m slm_experiments phase2 weights --prompts all
 | `docs/interventions.md`                             | § Building logit_bias — documents union of both contexts                    |
 | `ExperimentDesign.md`                               | Probability weighting — mid + sentence-start tokenization                   |
 | `tests/test_models.py`                              | Unit + `generate()` path assertions for union coverage                      |
-| `src/slm_experiments/phase1/configs.py`             | Weighting arms — **re-run required** under new bias                         |
-| `src/slm_experiments/phase2/weights.py`             | Weight sweep — **re-run required** under new bias                           |
+| `src/slm_experiments/phase2/weights.py`             | Weight sweep — **re-run required** under new bias before citing |
 
 
 **Status (2026-07-11):** Preferred fix applied and verified. Code biases
@@ -158,9 +151,8 @@ python -m slm_experiments phase2 weights --prompts all
 helper and the `generate()` → `logit_bias` path. Real-tokenizer diagnostic
 (`scripts/_tmp_diag_logit_bias_sentence_start.py`) confirmed coverage on
 Qwen2.5 GGUF (50 vocab words: 54 start-only IDs that mid-only would have
-missed). **Still required:** re-run Phase 1 (weighting / both) and Phase 2
-weights with `--prompts all` before citing results produced under the old
-mid-sentence-only bias.
+missed). **Still required for thesis:** re-run Phase 2 weights with
+`--prompts all` before citing weight results (Phase 1 is out of thesis scope).
 
 **What was modified**
 
@@ -177,7 +169,7 @@ return {
   - `test_create_logit_bias_includes_sentence_start_ids` — helper returns mid ∪ start
   - `test_config_weighting_applies_logit_bias` — `generate()` passes the same ID set
 - Diagnostic: `scripts/_tmp_diag_logit_bias_sentence_start.py` (mock + real GGUF).
-- **Still required:** re-run Phase 1 (weighting / both) and Phase 2 weights with `--prompts all`.
+- **Still required:** re-run Phase 2 weights with `--prompts all`.
 
 ---
 
@@ -189,11 +181,11 @@ return {
 
 **Status (2026-07-11):** `compute_summary_stats()` writes top-level `by_model` with nested `by_config` / sweep keys. Pooled sections remain as overview. `runs show` prints per-model lines. Thesis tables should still lead with per-model cells.
 
-### 7. Reframe “A1 success” as an automated readability proxy *DONE*
+### 7. Primary A1 gate is CEFR-SP (FK/Fog/Spache descriptive only) *DONE*
 
-**Why.** The binary success flag is three US readability formulas, not CEFR communicative descriptors. The metrics are near-collinear.
+**Why.** The binary success flag must not be mistaken for three US readability formulas. FK / Fog / Spache remain near-collinear diagnostics; they do not decide the gate.
 
-**Status (2026-07-11):** `ExperimentDesign.md` and `docs/metrics.md` (plus AGENT framing) describe `meets_a1_criteria` as a readability proxy pass. Field name unchanged. Human export/import remains the agreement layer.
+**Status:** `meets_a1_criteria` is the **CEFR-SP document-level A1** gate (`cefr_sp_level == "A1"` on a valid generation; see `evaluation/a1_criteria.py`). Documented in `ExperimentDesign.md`, `docs/metrics.md`, and `AGENTS.md` (cross-doc reconciliation under the eval-stack plan Phase F). Field name unchanged. Human ratings (three-rater study; legacy export/import for smoke) remain the agreement layer.
 
 ## Should do
 
@@ -225,25 +217,40 @@ return {
 
 
 
-### 9. Always report failure rate next to readability means
+### 9. Always report failure rate and maxed-out rate next to readability means *DONE*
 
-**Why.** Means in `summary.json` use only `generation_successful==True` rows; interventions that empty hard prompts look better on conditional FK.
+**Why.** Means in `summary.json` use only `generation_successful==True` rows; interventions that empty hard prompts look better on conditional FK. Separately, generations that exhaust `max_new_tokens` without EOS (“maxed out”) can still be marked successful while producing padded / incoherent text — that mode must be visible beside pass rates.
+
+**Status (2026-07-12):** Per-observation `hit_max_tokens` is recorded end-to-end. Summaries expose both rates in every bucket; `runs show` prints them.
+
+| Signal | Field | Meaning |
+|--------|--------|---------|
+| Failure | `generation_failure_rate` | Share with `generation_successful=False` (empty / timeout / error) |
+| Maxed out | `hit_max_tokens_rate` | Share that used the full token budget without a natural stop |
+
+Detection:
+
+| Path | How `hit_max_tokens` is set |
+|------|-----------------------------|
+| Greedy (`generate`) | llama.cpp `finish_reason == "length"` |
+| Guided | Constrained decoder exhausted `max_tokens` without EOS/stop |
+| KVL beam | Decode returned best survivor after exhausting budget (not first-finish) |
 
 **Files involved**
 
 
 | File                                    | Role                                                                                                                                            |
 | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/slm_experiments/core/run_store.py` | `_aggregate_metric_stats()` already computes `generation_failure_rate` and `a1_pass_rate` over all rows; means still exclude failures (~L63–87) |
-| `src/slm_experiments/core/pipeline.py`  | Sets `generation_successful` / empty cleaned text                                                                                               |
-| `ExperimentDesign.md`                   | § summary.json — tell readers which fields are primary                                                                                          |
+| `src/slm_experiments/core/result.py`    | `hit_max_tokens` on `ExperimentResult`                                                                                                          |
+| `src/slm_experiments/core/pipeline.py`  | Propagates flag from model response dicts                                                                                                       |
+| `src/slm_experiments/models/base.py` / `llamacpp.py` | Sets flag on greedy / guided / KVL paths                                                                                               |
+| `src/slm_experiments/models/constrained_decoder.py` | Guided `hit_max_tokens`                                                                                                                |
+| `src/slm_experiments/models/kvl_beam_decoder.py`    | KVL `hit_max_tokens`                                                                                                                   |
+| `src/slm_experiments/core/run_store.py` | `_aggregate_metric_stats()` → `generation_failure_rate`, `hit_max_tokens_rate` (+ counts); metadata mirrors both; `specification.csv` includes `hit_max_tokens` |
+| `src/slm_experiments/cli.py`            | `runs show` prints `failure_rate` and `maxed_out_rate`                                                                                          |
 
 
-**What to modify**
-
-- **Thesis tables:** for every cell print `a1_pass_rate`, `generation_failure_rate`, then conditional means.
-- **Optional code:** in `run_store.py` / `cli.py` `runs show`, print failure rate next to means by default so it is hard to miss.
-- **KVL:** ensure timeout failures from `models/base.py` / `llamacpp.py` remain `generation_successful=False` and are counted (see item 13).
+**Thesis tables:** for every cell print `a1_pass_rate`, `generation_failure_rate`, `hit_max_tokens_rate`, then conditional means.
 
 ---
 
@@ -361,21 +368,11 @@ Defaults: guided `--top-k-pools 0,5,10,20`; KVL `--widths 1,4,6,8`. Baseline row
 
 
 
-### 15. Acknowledge Phase 1’s fixed weight strength
+### 15. Acknowledge Phase 1’s fixed weight strength — *N/A for thesis*
 
 **Why.** Weighting arms always use `weight_factor=1.5`.
 
-**Files involved**
-
-
-| File                                    | Role                                                             |
-| --------------------------------------- | ---------------------------------------------------------------- |
-| `src/slm_experiments/phase1/configs.py` | `DEFAULT_WEIGHT_FACTOR = 1.5` applied for all cells (~L13, ~L51) |
-| `ExperimentDesign.md`                   | Phase 1 table — state “at weight_factor=1.5”                     |
-| `src/slm_experiments/phase2/weights.py` | Dose–response under combined setting                             |
-
-
-**What to modify:** docs/thesis wording; optionally only set `weight_factor` when `config_weighting=True` in `configs.py` to avoid misleading metadata on control rows (cosmetic).
+**Status (2026-07-12):** Phase 1 is out of thesis scope. If Phase 1 is ever revived, document “at weight_factor=1.5” in methods. Phase 2 weights already sweep the factor under the combined carrier.
 
 ---
 
@@ -497,7 +494,7 @@ Defaults: guided `--top-k-pools 0,5,10,20`; KVL `--widths 1,4,6,8`. Baseline row
 
 ## Recommended methods framing (paste-friendly)
 
-> We evaluate whether inference-time interventions improve **automated readability** of English answers from four small instruction-tuned models under **deterministic greedy decoding** (`temperature = 0`, `top_k = 50`, max 200 new tokens; see `src/slm_experiments/core/config.py`). Primary binary outcome is a **proxy pass** (`meets_a1_criteria` in `evaluation/a1_criteria.py`) requiring Flesch–Kincaid ≤ 5, Gunning Fog ≤ 6, and Spache ≤ 4 on valid generations. This is not a CEFR A1 proficiency test; human ratings on a subsample assess agreement with the proxy. Phase 1 (`phase1/configs.py`) uses a 2×2 factorial of logit bias (weight factor 1.5) and contextual prompting. Phase 2 sweeps one hyperparameter at a time on fixed carriers in `phase2/*.py`. All published results use the full 25-prompt set (`STANDARD_PROMPTS` in `core/prompts.py`). Best-of-N beam (`phase2 beam`) at temperature 0 is excluded. KVL beam (`models/kvl_beam_decoder.py`) uses first-finish stopping (mean KVL does not reward EOS; without it, outputs pad to max length) and is scored for Spanish L1 vocabulary difficulty unless other L1s are swept.
+> We evaluate whether inference-time interventions make English answers from four small instruction-tuned models easier for beginner learners under **deterministic greedy decoding** (`temperature = 0`, `top_k = 50`, max 200 new tokens; see `src/slm_experiments/core/config.py`). The primary binary outcome is **CEFR-SP document-level A1** (`meets_a1_criteria` in `evaluation/a1_criteria.py` when `cefr_sp_level == "A1"` on a valid generation). Flesch–Kincaid, Gunning Fog, and Spache are recorded as **descriptive** readability diagnostics only and do **not** decide the gate. This is a text-difficulty classifier outcome, not a CEFR A1 proficiency test of a learner; human ratings on a subsample assess agreement with the automatic flag. The thesis reports **Phase 2 only**: one-at-a-time hyperparameter sweeps on fixed carriers in `phase2/*.py` (weights, prompting shots, guided top-k, KVL beam width). Phase 1’s 2×2 factorial is implemented but not run for this thesis. All published results use the full 25-prompt set (`STANDARD_PROMPTS`); the CLI default of 3 prompts is a smoke-test guardrail. Best-of-N beam (`phase2 beam`) at temperature 0 is excluded. KVL beam (`models/kvl_beam_decoder.py`) uses first-finish stopping (mean KVL does not reward EOS; without it, outputs pad to max length) and is scored for Spanish L1 vocabulary difficulty unless other L1s are swept. Thesis tables report per-model `a1_pass_rate`, `generation_failure_rate`, and `hit_max_tokens_rate` beside conditional readability / KVL means.
 
 ---
 
@@ -505,15 +502,16 @@ Defaults: guided `--top-k-pools 0,5,10,20`; KVL `--widths 1,4,6,8`. Baseline row
 
 ## Priority checklist before defending results
 
-- [ ] All cited runs use `--prompts all` on **current** temp=0 code (`phase1/runner.py` / `phase2/*.py` defaults overridden via CLI)
+- [x] Formal Phase 2 claims use `--prompts all` (n=3 default is smoke guardrail only)
+- [x] Thesis scope = **Phase 2 only** (Phase 1 not run / not cited)
 - [x] `ExperimentDesign.md`, `docs/interventions.md`, `docs/guided-decoding.md`, `docs/kvl_beamsearch.md` match `core/config.py` (temp=0.0, no top_p; guided/KVL marked implemented)
 - [x] Deprecated beam excluded (`cli.py` hard-fail / `scripts/clusteruy/run_phase2_beam.sh` exits 1 / thesis docs exclude)
 - [x] KVL first-finish **kept by design** and disclosed (`docs/kvl_beamsearch.md` / `ExperimentDesign.md` §2e / `kvl_beam_decoder.py` docstring). Rationale: mean KVL does not reward stop; without first-finish, outputs pad to `max_new_tokens`. Width ≠ “better final KVL pick.”
-- [x] Logit bias sentence-start fixed in `llamacpp.py` `_create_logit_bias` (union mid + start IDs); helper + `generate()` tests + real-GGUF diag pass; **re-run** Phase 1 weighting / both and Phase 2 weights with `--prompts all` before citing results
+- [x] Logit bias sentence-start fixed in `llamacpp.py` `_create_logit_bias` (union mid + start IDs); **re-run Phase 2 weights** with `--prompts all` before citing
 - [x] `by_model` added in `run_store.py`; thesis tables should stratify by model
-- [x] “A1 pass” framed as readability proxy in `ExperimentDesign.md` / `docs/metrics.md`
+- [x] `meets_a1_criteria` framed as CEFR-SP document-level A1 (`cefr_sp_level == "A1"`) in `ExperimentDesign.md` / `docs/metrics.md` / `AGENTS.md`; FK/Fog/Spache descriptive only (eval-stack Phase F cross-doc reconciliation)
 - [ ] Phase 2a framed as combined prompting + weight in `ExperimentDesign.md` / `weights.py` docstring
-- [ ] Failure rates from `summary.json` reported beside conditional means
+- [x] Failure + maxed-out rates in `summary.json` / `runs show` / `specification.csv` (`generation_failure_rate`, `hit_max_tokens_rate`)
 - [x] Guided / KVL in-run baselines in `phase2/guided.py` and `phase2/kvl_beam.py` (defaults `0,5,10,20` and `1,4,6,8`)
 - [ ] KVL claims scoped to L1 = Spanish (`config.kvl_l1`) or multi-L1 sweeps completed
 
@@ -528,7 +526,7 @@ Defaults: guided `--top-k-pools 0,5,10,20`; KVL `--widths 1,4,6,8`. Baseline row
 | ---------------- | ----------------------------------------------------------------------- |
 | Review date      | 2026-07-08                                                              |
 | Document written | 2026-07-11                                                              |
-| Document updated | 2026-07-11 (items 2–7, 11 attended; item 4 Option B + first-finish rationale) |
+| Document updated | 2026-07-12 (Phase 2–only thesis; prompts-all policy; failure + maxed-out rates) |
 | Command          | `/multi-model-review`                                                   |
 | Focus            | Experiment configs, baselines, grids, evaluation validity               |
 | Prior review     | `[improvements.md](../improvements.md)` (2026-06, implementation fixes) |

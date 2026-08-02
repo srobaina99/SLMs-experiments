@@ -85,6 +85,17 @@ class TestKvlV2TokenSemantics:
         # Unique set collapses repeats of the same surface form.
         assert tokens.count("friends") >= 2 or tokens.count("friend") >= 2
 
+    def test_extract_content_words_single_cache(self):
+        evaluator = TextEvaluator()
+        text = "Friends help friends."
+        assert not hasattr(evaluator, "_pos_cache")
+        _ = evaluator.extract_content_words(text)
+        assert (text, False) in evaluator._token_cache
+        # Second call hits the same token cache (no parallel set cache).
+        before = len(evaluator._token_cache)
+        _ = evaluator.extract_content_words(text)
+        assert len(evaluator._token_cache) == before
+
     def test_playing_lemmatizes_to_play_and_hits_kvl(self, fixture_lookup):
         """Blocker regression: POS-aware WordNet must map playing→play for lookup."""
         assert lemmatize_english_token("playing", "VBG") == "play"
@@ -167,6 +178,62 @@ class TestKvlV2TokenSemantics:
         assert rev["lower_tail_percentile"] == KVL_V2_LOWER_TAIL_PERCENTILE
         assert "simplemma" not in rev["lemmatizer"]
 
+    def test_missing_wordnet_does_not_claim_nltk(self):
+        """WordNet probe failure must fall through (simplemma if present, else identity)."""
+        import builtins
+        import slm_experiments.evaluation.metrics as metrics_mod
+
+        class BrokenLemmatizer:
+            def lemmatize(self, *_args, **_kwargs):
+                raise LookupError("Resource wordnet not found.")
+
+        real_import = builtins.__import__
+
+        def _import_no_simplemma(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "simplemma" or name.startswith("simplemma."):
+                raise ImportError("simplemma not installed (test stub)")
+            return real_import(name, globals, locals, fromlist, level)
+
+        metrics_mod.reset_lemmatizer_backend_cache()
+        try:
+            with patch.object(
+                metrics_mod, "WordNetLemmatizer", BrokenLemmatizer
+            ), patch.object(metrics_mod, "NLTK_AVAILABLE", True), patch(
+                "builtins.__import__", side_effect=_import_no_simplemma
+            ):
+                backend = resolve_lemmatizer_backend()
+            assert backend == "identity"
+            assert not backend.startswith("nltk.")
+        finally:
+            metrics_mod.reset_lemmatizer_backend_cache()
+
+        # When simplemma is importable, probe failure selects it (no hard dep).
+        fake_simplemma = type(
+            "simplemma",
+            (),
+            {"__version__": "0.0-test", "lemmatize": staticmethod(lambda t, lang="en": t)},
+        )()
+        metrics_mod.reset_lemmatizer_backend_cache()
+        try:
+            with patch.object(
+                metrics_mod, "WordNetLemmatizer", BrokenLemmatizer
+            ), patch.object(metrics_mod, "NLTK_AVAILABLE", True), patch.dict(
+                "sys.modules", {"simplemma": fake_simplemma}
+            ):
+                backend = resolve_lemmatizer_backend()
+            assert backend == "simplemma/0.0-test"
+        finally:
+            metrics_mod.reset_lemmatizer_backend_cache()
+
+    def test_omw_not_in_import_time_resource_loop(self):
+        import slm_experiments.evaluation.metrics as metrics_mod
+        import inspect
+
+        source = inspect.getsource(metrics_mod)
+        # Comment may mention omw-1.4; the download/find resource tuple must not.
+        assert '("omw-1.4", "corpora")' not in source
+        assert "(\"omw-1.4\", \"corpora\")" not in source
+
 
 class TestKvlV2CoverageAndAggregates:
     def test_oov_excluded_from_mean_but_counted_in_coverage(self, fixture_lookup):
@@ -242,6 +309,21 @@ class TestKvlV2AssessmentScorer:
     def test_registered(self):
         assert KVL_V2_SCORER_NAME in list_scorers()
 
+    def test_ensure_registered_uses_public_api_not_private_registry(self):
+        from slm_experiments.evaluation.assessment import scorers as scorers_mod
+
+        clear_scorers()
+        assert KVL_V2_SCORER_NAME not in list_scorers()
+        with patch(
+            "slm_experiments.evaluation.assessment.kvl_v2.ensure_scorer_registered",
+            wraps=scorers_mod.ensure_scorer_registered,
+        ) as ensure_fn:
+            ensure_registered()
+            ensure_fn.assert_called_once_with(KVL_V2_SCORER_NAME, score_kvl_v2)
+        assert KVL_V2_SCORER_NAME in list_scorers()
+        assert scorers_mod.ensure_scorer_registered(KVL_V2_SCORER_NAME, score_kvl_v2) is False
+        assert list_scorers().count(KVL_V2_SCORER_NAME) == 1
+
     def test_score_items_adds_v2_columns(self, fixture_lookup):
         items = pd.DataFrame(
             [
@@ -268,6 +350,27 @@ class TestKvlV2AssessmentScorer:
         row2 = scored.set_index("item_id").loc["i2"]
         assert row2["kvl_v2_status"] == "missing"
         assert row2["kvl_v2_mean_score"] is None or pd.isna(row2["kvl_v2_mean_score"])
+
+    def test_kvl_l1_column_ignored_always_es(self, fixture_lookup):
+        """Assessment KVL v2 is fixed to Spanish; kvl_l1 on items is ignored."""
+        items = pd.DataFrame(
+            [
+                {
+                    "item_id": "i1",
+                    "cleaned_response": "A friend is a person you like.",
+                    "kvl_l1": "de",
+                },
+            ]
+        )
+        with patch(
+            "slm_experiments.evaluation.assessment.kvl_v2.KvlLookup",
+            return_value=fixture_lookup,
+        ):
+            scored = score_kvl_v2(items)
+
+        row = scored.iloc[0]
+        assert row["kvl_v2_status"] == "ok"
+        assert row["kvl_v2_l1"] == "es"
 
     def test_summary_namespaced_under_scorers(self, fixture_lookup):
         scores = pd.DataFrame(
@@ -307,6 +410,53 @@ class TestKvlV2AssessmentScorer:
         assert block["overall"]["kvl_v2_mean_coverage"] == 1.0
         assert block["overall"]["kvl_v2_mean_score"] == 1.5
         assert "Qwen3" in block["by_model"]
+        # No multi-value sweep column here → empty list (not a string).
+        assert block["metadata"]["sweep_dimension"] == []
+        assert block["metadata"]["sweep_values"] == {}
+
+    def test_sweep_dimension_list_for_mixed_families(self):
+        scores = pd.DataFrame(
+            [
+                {
+                    "item_id": "i1",
+                    "kvl_v2_status": "ok",
+                    "kvl_v2_lookup_coverage": 1.0,
+                    "kvl_v2_mean_score": 1.5,
+                    "kvl_v2_hard_token_share": 0.0,
+                    "kvl_v2_lower_tail_score": 1.0,
+                }
+            ]
+        )
+        item_map = pd.DataFrame(
+            [
+                {
+                    "item_id": "i1",
+                    "model": "Qwen3",
+                    "weight_factor": 1.0,
+                    "num_shots": 0,
+                    "generation_successful": True,
+                    "hit_max_tokens": False,
+                    "in_sample": True,
+                },
+                {
+                    "item_id": "i1",
+                    "model": "Qwen3",
+                    "weight_factor": 2.0,
+                    "num_shots": 3,
+                    "generation_successful": True,
+                    "hit_max_tokens": False,
+                    "in_sample": True,
+                },
+            ]
+        )
+        summary = compute_kvl_v2_assessment_summary(scores, item_map)
+        dims = summary["metadata"]["sweep_dimension"]
+        assert isinstance(dims, list)
+        assert "weight_factor" in dims
+        assert "num_shots" in dims
+        assert set(dims) == set(summary["metadata"]["sweep_values"].keys())
+        assert "by_weight_factor" in summary
+        assert "by_num_shots" in summary
 
 
 def _make_result(

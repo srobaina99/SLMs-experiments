@@ -96,10 +96,15 @@ def _build_factorial_bundle(tmp_path: Path, num_prompts: int = 3) -> tuple[str, 
 
 class TestConfigLabel:
     def test_config_labels(self):
+        from slm_experiments.core.config_label import config_label as shared_label
+
         assert config_label(False, False) == "control"
         assert config_label(True, False) == "weighting_only"
         assert config_label(False, True) == "prompting_only"
         assert config_label(True, True) == "both"
+        # human.export re-exports the shared core helper (Batch D2).
+        assert config_label is shared_label
+        assert shared_label(True, True) == "both"
 
 
 class TestStratifiedSample:
@@ -225,3 +230,21 @@ class TestHumanRoundTrip:
 
         manifest = json.loads((store.run_dir(run_id) / "manifest.json").read_text())
         assert manifest["human_eval"]["updated_rows"] == exported_count
+
+
+class TestLegacyExportKindGuard:
+    def test_export_rejects_assessment_bundle(self, tmp_path: Path):
+        from slm_experiments.evaluation.assessment import AssessmentBundler
+
+        run_id, store = _build_factorial_bundle(tmp_path, num_prompts=2)
+        assess_id, _ = AssessmentBundler(results_root=tmp_path).build(
+            [run_id], seed=42
+        )
+        exporter = HumanExporter(results_root=tmp_path)
+        with pytest.raises(ValueError, match="study-export"):
+            exporter.export(assess_id, sample=2)
+        # Generation export still works.
+        out_path, n = exporter.export(run_id, sample=2)
+        assert n == 2
+        assert out_path.exists()
+        assert store.run_dir(run_id).exists()

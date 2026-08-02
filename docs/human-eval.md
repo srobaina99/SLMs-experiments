@@ -33,14 +33,19 @@ python -m slm_experiments human import --run-id <generation_id> --tags <csv>
 
 ## Study artifacts (`{assessment}/study/`)
 
+Distribute **only** `{assessment}/study/rater_packet/` to raters. Analyst files
+(`source_key.csv`, `analysis_items.csv`, `calibration_items.csv`, `manifest.json`)
+sit beside that packet under `study/` and must not travel with rater materials —
+they include stratum / model / arm / CEFR-band labels that would break blinding.
+
 | Artifact | Audience | Contents |
 |----------|----------|----------|
+| `rater_packet/rater_sheets/rater_{id}.csv` | Raters (distribute) | Blind columns only: `item_id`, `prompt`, `answer`, empty 1–4 dims + notes |
+| `rater_packet/beginner_suitability_rubric_v0.md` | Raters (distribute) | Copied Spanish-anchor rubric |
 | `source_key.csv` | Private (not for raters) | `item_id` → model / family / arm / stratum / inclusion weights / source ids |
-| `analysis_items.csv` | Analysts | Shared analysis sample with weights |
-| `calibration_items.csv` | Pilot only | Calibration draw **excluded** from analysis |
-| `rater_sheets/rater_{id}.csv` | Raters | Blind columns only: `item_id`, `prompt`, `answer`, empty 1–4 dims + notes |
-| `beginner_suitability_rubric_v0.md` | Raters | Copied Spanish-anchor rubric |
-| `manifest.json` | Analysts | Sample sizes, seed, strata axes, rater ids |
+| `analysis_items.csv` | Analysts | Shared analysis sample with weights **and stratum** (analyst-only path) |
+| `calibration_items.csv` | Pilot only | Calibration draw **excluded** from analysis (analyst-only; includes stratum) |
+| `manifest.json` | Analysts | Sample sizes, seed, strata axes, rater ids; `distribute_to_raters: "rater_packet"` |
 | `ratings.csv` | After import | Long-format validated ratings |
 | `consensus.csv` | After import | Per-item medians + `human_suitable` |
 | `reliability.json` | After import | Percent-agreement reliability report |
@@ -51,15 +56,23 @@ Modules: `human/study_export.py`, `study_import.py`, `reliability.py`, `rubric.p
 
 ## Blinding and sample
 
-- **Blind sheet columns:** `item_id`, `prompt`, `answer` (= assessment `cleaned_response`). Never `model`, `config`, `experiment_id`, CEFR, KVL, or other scorer fields.
+- **Rater packet:** share only `study/rater_packet/` (sheets + rubric). Never include `source_key.csv`, `analysis_items.csv`, or `calibration_items.csv` in the distributed zip.
+- **Blind sheet columns:** `item_id`, `prompt`, `answer` (= assessment `cleaned_response`). Never `model`, `config`, `experiment_id`, CEFR, KVL, stratum, arm, or other scorer fields.
 - **Answer text:** rate the same string the assessment scorers see (`cleaned_response`), not raw `response`.
 - **Default analysis n = 100** unique items after an **excluded calibration pilot** (default 10).
 - **Stratification axes** on the assessment item frame: family, model, arm (baseline/intervention), CEFR band, TSAR↔CEFR-SP disagreement, truncation.
 - One shared item set; **independent per-rater shuffle**; exactly one rating per `(item_id, rater_id)` (validated on import).
+- **Rater coverage:** consensus medians and `human_suitable` are emitted only for items rated by **all expected raters** (default `r1,r2,r3` from the study export manifest). Incomplete items stay in `ratings.csv` but are skipped for consensus/reliability with a warning.
+- Re-export refuses to wipe `study/` if imported ratings already exist (`ratings.csv` / `consensus.csv` / `reliability.json`); pass `--force` to overwrite.
 
-### Inclusion-weight caveat
+### Inclusion weights
 
-`inclusion_weight` on analysis items is **conditional on the post-calibration frame** — approximately \(P(\text{select} \mid \text{not in calibration})\), not the unconditional inclusion probability against the original pool. Automatic-vs-human validation (`analysis.py`) records the same caveat and uses the weights as stored. Do not treat weighted estimates as clean Horvitz–Thompson against the pre-calibration pool.
+`inclusion_weight` on analysis (and calibration) items is the Horvitz–Thompson
+weight \(1/\pi_i\) against the **original** stratified pool (pre-calibration).
+For stratum \(s\) of size \(N_s\), if \(n_s\) analysis items are drawn after the
+calibration pilot is excluded, \(\pi_i = n_s / N_s\) (unconditional on remaining
+in the post-calibration frame). Automatic-vs-human validation (`analysis.py`)
+uses these weights as stored.
 
 ## Rubric (`beginner_suitability_rubric_v0`)
 
@@ -76,7 +89,7 @@ Scale: integers **1–4** only. If unsure between two anchors, choose the lower.
 
 ### Binary human-suitable
 
-Consensus uses the **unweighted median** across raters per dimension.
+Consensus uses the **unweighted median** across raters per dimension — only for items with full expected-rater coverage (see above).
 
 \[
 \texttt{human\_suitable} \iff m(\texttt{overall\_suitability}) \ge 3 \;\textbf{and}\; m(\texttt{answer\_adequacy}) \ge 3

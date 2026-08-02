@@ -8,7 +8,8 @@ from typing import Optional, Union
 
 import pandas as pd
 
-from slm_experiments.core.run_store import RunStore
+from slm_experiments.core.config_label import config_label
+from slm_experiments.core.run_store import KIND_ASSESSMENT, RunStore
 from slm_experiments.models.base import REPO_ROOT
 
 HUMAN_REVIEW_FILENAME = "human_review.csv"
@@ -25,17 +26,6 @@ EXPORT_COLUMNS = [
     "vocabulary_level",
     "notes",
 ]
-
-
-def config_label(config_weighting: bool, config_prompting: bool) -> str:
-    """Map intervention flags to a config label."""
-    if config_weighting and config_prompting:
-        return "both"
-    if config_weighting:
-        return "weighting_only"
-    if config_prompting:
-        return "prompting_only"
-    return "control"
 
 
 def stratified_sample(
@@ -104,6 +94,15 @@ class HumanExporter:
         if not run_dir.exists():
             raise FileNotFoundError(f"Run bundle not found: {run_dir}")
 
+        manifest = self.run_store.read_manifest(run_id)
+        if manifest.get("kind", "generation") == KIND_ASSESSMENT:
+            raise ValueError(
+                f"run {run_id} is an assessment bundle; legacy human export "
+                f"requires a generation run. Use "
+                f"`human study-export --assessment-run-id {run_id}` for the "
+                f"three-rater blinded study."
+            )
+
         full_df = self.run_store.read_full_csv(run_id)
         if full_df.empty:
             raise ValueError(f"Run bundle {run_id} has no observations in full.csv")
@@ -134,7 +133,6 @@ class HumanExporter:
         review_df[EXPORT_COLUMNS].to_csv(out_path, index=False)
 
         manifest_path = run_dir / "manifest.json"
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         artifacts = manifest.setdefault("artifacts", {})
         artifacts["human_review_csv"] = HUMAN_REVIEW_FILENAME
         manifest["human_eval"] = {

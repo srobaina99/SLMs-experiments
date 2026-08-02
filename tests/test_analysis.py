@@ -24,6 +24,22 @@ from slm_experiments.human.rubric import (
 from slm_experiments.human.study_export import arm_label
 
 
+class TestAnalysisImportSurface:
+    """Smoke: facade re-exports survive the D1 split."""
+
+    def test_public_symbols_importable_from_facade(self):
+        from slm_experiments.evaluation.assessment import analysis
+        from slm_experiments.evaluation.assessment import analysis_helpers
+        from slm_experiments.evaluation.assessment import paired_deltas
+        from slm_experiments.evaluation.assessment import validation
+
+        assert analysis.analyze_assessment_bundle is not None
+        assert analysis.build_paired_deltas is paired_deltas.build_paired_deltas
+        assert analysis.build_validation_section is validation.build_validation_section
+        assert analysis.resolve_arm is analysis_helpers.resolve_arm
+        assert analysis.DEFAULT_RESAMPLES == analysis_helpers.DEFAULT_RESAMPLES
+
+
 SIMPLE_RESPONSE = (
     "A friend is a person you like. You talk to a friend. "
     "You play with a friend. A friend helps you."
@@ -80,7 +96,7 @@ def _write_generation_bundle(
     return run_id
 
 
-def _fake_score_items(items: pd.DataFrame) -> pd.DataFrame:
+def _fake_score_items(items: pd.DataFrame, **_kwargs) -> pd.DataFrame:
     """Deterministic fake TSAR + KVL scores keyed by response text length."""
     rows = []
     for _, item in items.iterrows():
@@ -476,7 +492,7 @@ class TestAnalyzeBundle:
         # Model-first ordering: first column is model.
         assert list(deltas.columns)[0] == "model"
 
-    def test_no_baseline_recorded_not_hard_fail(self, tmp_path: Path):
+    def test_no_baseline_recorded_not_hard_fail(self, tmp_path: Path, recwarn):
         from slm_experiments.evaluation.assessment.analysis import (
             analyze_assessment_bundle,
         )
@@ -505,9 +521,11 @@ class TestAnalyzeBundle:
             "slm_experiments.evaluation.assessment.bundle.score_items",
             side_effect=_fake_score_items,
         ):
+            # Clear warnings from auto-analyze inside build before the lock.
             assess_id, _ = AssessmentBundler(results_root=tmp_path).build(
                 [source_id], seed=42
             )
+        recwarn.clear()
 
         analyze_assessment_bundle(
             assess_id, results_root=tmp_path, bootstrap_seed=42, resamples=50
@@ -521,6 +539,15 @@ class TestAnalyzeBundle:
         assert block["status"] == "no_baseline"
         assert "reason" in block
         assert analysis["warnings"]
+        assert any("baseline" in w.lower() for w in analysis["warnings"])
+        # C8: no UserWarning spam on the no_baseline path (INFO log only).
+        baseline_user_warnings = [
+            w
+            for w in recwarn
+            if issubclass(w.category, UserWarning)
+            and ("baseline" in str(w.message).lower() or "no_baseline" in str(w.message))
+        ]
+        assert baseline_user_warnings == []
 
     def test_analyze_cli_dispatches(self, tmp_path: Path, capsys, monkeypatch):
         monkeypatch.setattr(
@@ -635,6 +662,8 @@ class TestOrdinalAssociation:
     def test_weighted_association_omits_spearman(self):
         from slm_experiments.evaluation.assessment.analysis import (
             SPEARMAN_WEIGHTED_NOT_REPORTED,
+        )
+        from slm_experiments.evaluation.assessment.validation import (
             _association_block,
         )
 
@@ -777,11 +806,13 @@ class TestAdequacyNonInferiority:
     def test_preserved_false_when_ci_high_equals_margin(self, monkeypatch):
         """Strict inequality: ci_high == 0.5 must not count as preserved."""
         import slm_experiments.evaluation.assessment.analysis as analysis_mod
+        import slm_experiments.evaluation.assessment.validation as validation_mod
 
         def _pinned_ci(values, **kwargs):
             return {"point_estimate": 0.4, "ci_low": 0.3, "ci_high": 0.5}
 
-        monkeypatch.setattr(analysis_mod, "percentile_bootstrap_ci", _pinned_ci)
+        # Patch the binding used by adequacy_noninferiority (validation module).
+        monkeypatch.setattr(validation_mod, "percentile_bootstrap_ci", _pinned_ci)
         result = analysis_mod.adequacy_noninferiority(
             np.array([0.4, 0.4, 0.4, 0.4]),
             bootstrap_seed=42,
@@ -986,7 +1017,9 @@ class TestValidationBundleIntegration:
         assert "kappa" in meta["chance_correction"].lower() or (
             "omitted" in meta["chance_correction"].lower()
         )
-        assert "inclusion_weight_caveat" in meta
+        assert "inclusion_weight_definition" in meta
+        assert "unconditional" in meta["inclusion_weight_definition"].lower()
+        assert "inclusion_weight_caveat" not in meta
         assert "estimators" in meta
         assert "pair-weighted" in meta["estimators"]["kendall_tau_b_weighted"]
         assert "not reported" in meta["estimators"]["spearman_rho_weighted"].lower()
@@ -1042,8 +1075,10 @@ class TestValidationBundleIntegration:
         """Blank spearman cells are ambiguous without status — pin the vocabulary."""
         from slm_experiments.evaluation.assessment.analysis import (
             SPEARMAN_WEIGHTED_NOT_REPORTED,
-            _association_block,
             build_validation_section,
+        )
+        from slm_experiments.evaluation.assessment.validation import (
+            _association_block,
         )
 
         # Association-level: weighted omission vs unweighted undefined under ties.

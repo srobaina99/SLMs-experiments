@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Union
 
 import pandas as pd
 
+from slm_experiments.core.config_label import config_label
 from slm_experiments.core.result import ExperimentResult
 
 SPEC_COLUMNS = [
@@ -17,6 +18,7 @@ SPEC_COLUMNS = [
     "answer",
     "time_spent",
     "generation_successful",
+    "hit_max_tokens",
     "meets_a1_criteria",
     "flesch_kincaid_grade",
     "gunning_fog",
@@ -79,6 +81,14 @@ def _aggregate_metric_stats(df: pd.DataFrame) -> Dict[str, Any]:
         stats["generation_failure_rate"] = float(1 - len(successful) / len(df))
     else:
         stats["generation_failure_rate"] = 0.0
+
+    if "hit_max_tokens" in df.columns:
+        maxed = int(df["hit_max_tokens"].fillna(False).astype(bool).sum())
+        stats["hit_max_tokens_count"] = maxed
+        stats["hit_max_tokens_rate"] = float(maxed / len(df)) if len(df) else 0.0
+    else:
+        stats["hit_max_tokens_count"] = 0
+        stats["hit_max_tokens_rate"] = 0.0
 
     if "meets_a1_criteria" in df.columns:
         a1_pass = int(df["meets_a1_criteria"].sum())
@@ -199,13 +209,7 @@ def make_run_id(
 
 
 def _config_label(row: pd.Series) -> str:
-    if row["config_weighting"] and row["config_prompting"]:
-        return "both"
-    if row["config_weighting"]:
-        return "weighting_only"
-    if row["config_prompting"]:
-        return "prompting_only"
-    return "control"
+    return config_label(bool(row["config_weighting"]), bool(row["config_prompting"]))
 
 
 def _metric_stats(series: pd.Series) -> Optional[Dict[str, float]]:
@@ -261,6 +265,12 @@ def compute_summary_stats(
         "unique_prompts": int(df["prompt"].nunique()),
         "configs_tested": int(df["config_name"].nunique()),
     }
+    if "hit_max_tokens" in df.columns:
+        maxed = int(df["hit_max_tokens"].fillna(False).astype(bool).sum())
+        summary["metadata"]["hit_max_tokens_count"] = maxed
+        summary["metadata"]["hit_max_tokens_rate"] = (
+            float(maxed / len(df)) if len(df) else 0.0
+        )
     if "model" in df.columns:
         summary["metadata"]["models_tested"] = df["model"].unique().tolist()
 
@@ -304,6 +314,7 @@ class RunStore:
 
         successful = sum(1 for r in results if r.generation_successful)
         failed = len(results) - successful
+        maxed = sum(1 for r in results if r.hit_max_tokens)
 
         manifest = {
             "kind": KIND_GENERATION,
@@ -319,6 +330,7 @@ class RunStore:
                 "total": len(results),
                 "successful": successful,
                 "failed": failed,
+                "hit_max_tokens": maxed,
             },
             "artifacts": {
                 "specification_csv": "specification.csv",

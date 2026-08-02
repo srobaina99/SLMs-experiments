@@ -9,7 +9,10 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
-from slm_experiments.evaluation.assessment.scorers import register_scorer
+from slm_experiments.evaluation.assessment.scorers import (
+    ensure_scorer_registered,
+    register_scorer,
+)
 from slm_experiments.evaluation.kvl import (
     DEFAULT_KVL_L1,
     KVL_V2_LOWER_TAIL_PERCENTILE,
@@ -89,10 +92,11 @@ def _row_from_metrics(
 
 
 @register_scorer(KVL_V2_SCORER_NAME)
-def score_kvl_v2(items: pd.DataFrame) -> pd.DataFrame:
+def score_kvl_v2(items: pd.DataFrame, **_kwargs: Any) -> pd.DataFrame:
     """Score successful non-empty cleaned_response texts with KVL v2.
 
     Never mutates generation runs; never sets meets_a1_criteria.
+    Extra keyword args are ignored (score_items may pass per-scorer options).
     """
     if items.empty or "item_id" not in items.columns:
         return pd.DataFrame(columns=list(SCORE_COLUMNS))
@@ -104,12 +108,9 @@ def score_kvl_v2(items: pd.DataFrame) -> pd.DataFrame:
         working["cleaned_response"].fillna("").astype(str).str.strip()
     )
 
+    # Assessment KVL v2 is fixed to Spanish L1. Callers may still pass a
+    # ``kvl_l1`` column on items; it is ignored (public API stays stable).
     l1 = DEFAULT_KVL_L1
-    if "kvl_l1" in working.columns:
-        # Prefer first non-null source L1 when present on items.
-        non_null = working["kvl_l1"].dropna()
-        if not non_null.empty:
-            l1 = str(non_null.iloc[0])
 
     lookup = KvlLookup()
     rows: List[Dict[str, Any]] = []
@@ -146,10 +147,7 @@ def score_kvl_v2(items: pd.DataFrame) -> pd.DataFrame:
 
 def ensure_registered() -> None:
     """Re-register after ``clear_scorers`` (tests) or ensure import side-effect."""
-    from slm_experiments.evaluation.assessment import scorers as scorers_mod
-
-    if KVL_V2_SCORER_NAME not in scorers_mod.list_scorers():
-        scorers_mod._REGISTRY[KVL_V2_SCORER_NAME] = score_kvl_v2  # noqa: SLF001
+    ensure_scorer_registered(KVL_V2_SCORER_NAME, score_kvl_v2)
 
 
 def kvl_v2_scorer_revision() -> Dict[str, Any]:
@@ -284,6 +282,8 @@ def compute_kvl_v2_assessment_summary(
             by_model[str(model_name)] = _kvl_v2_metric_block(group, scores_df)
         summary["by_model"] = by_model
 
+    sweep_dimensions: List[str] = []
+    sweep_values: Dict[str, List[str]] = {}
     for col in _SWEEP_COLUMNS:
         if col not in item_map_df.columns:
             continue
@@ -298,8 +298,11 @@ def compute_kvl_v2_assessment_summary(
                 item_map_df.loc[mask], scores_df
             )
         summary[section] = grouped
-        summary["metadata"]["sweep_dimension"] = col
-        summary["metadata"]["sweep_values"] = list(grouped.keys())
+        sweep_dimensions.append(col)
+        sweep_values[col] = list(grouped.keys())
+    # List (not overwritten string) so mixed-family bundles keep all axes.
+    summary["metadata"]["sweep_dimension"] = sweep_dimensions
+    summary["metadata"]["sweep_values"] = sweep_values
 
     return summary
 

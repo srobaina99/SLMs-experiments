@@ -18,6 +18,7 @@ from slm_experiments.evaluation.assessment.bundle import AssessmentBundler
 from slm_experiments.evaluation.assessment.cefr_tsar import (
     A1_SIGNAL_FALLBACK_KEY,
     CEFR_TSAR_LEVELS,
+    DEFAULT_BATCH_SIZE,
     TSAR_MODELS,
     TSAR_SCORER_NAME,
     aggregate_confidence_max,
@@ -282,6 +283,50 @@ class TestMockedEnsembleScorer:
             row["cefr_tsar_disagrees_with_cefr_sp"]
         )
 
+    def test_failed_generation_marked_missing_even_with_text(self):
+        items = pd.DataFrame(
+            {
+                "item_id": ["i1", "i2"],
+                "cleaned_response": ["Hello friend.", "Also text."],
+                "cefr_sp_level": ["A1", "A1"],
+                "generation_successful": [False, True],
+            }
+        )
+
+        def fake_predict(texts, *, models=None, device=None, batch_size=8):
+            assert texts == ["Also text."]
+            return [
+                [
+                    {"key": m["key"], "label": "A1", "score": 0.9}
+                    for m in TSAR_MODELS
+                ]
+            ]
+
+        with patch(
+            "slm_experiments.evaluation.assessment.cefr_tsar.predict_member_labels",
+            side_effect=fake_predict,
+        ):
+            scored = score_cefr_tsar(items)
+        by_id = scored.set_index("item_id")
+        assert by_id.loc["i1", "cefr_tsar_status"] == "missing"
+        assert by_id.loc["i2", "cefr_tsar_status"] == "ok"
+
+    def test_ensure_registered_uses_public_api_not_private_registry(self):
+        from slm_experiments.evaluation.assessment import scorers as scorers_mod
+
+        clear_scorers()
+        assert TSAR_SCORER_NAME not in list_scorers()
+        with patch(
+            "slm_experiments.evaluation.assessment.cefr_tsar.ensure_scorer_registered",
+            wraps=scorers_mod.ensure_scorer_registered,
+        ) as ensure_fn:
+            ensure_registered()
+            ensure_fn.assert_called_once_with(TSAR_SCORER_NAME, score_cefr_tsar)
+        assert TSAR_SCORER_NAME in list_scorers()
+        # Idempotent — second call is a no-op via the public API.
+        assert scorers_mod.ensure_scorer_registered(TSAR_SCORER_NAME, score_cefr_tsar) is False
+        assert list_scorers().count(TSAR_SCORER_NAME) == 1
+
     def test_predict_error_writes_error_state(self):
         items = pd.DataFrame(
             {
@@ -297,6 +342,40 @@ class TestMockedEnsembleScorer:
             scored = score_cefr_tsar(items)
         assert scored.iloc[0]["cefr_tsar_status"] == "error"
         assert "no torch" in str(scored.iloc[0]["cefr_tsar_error"])
+
+    def test_unnormalizable_winning_label_is_error_not_ok(self):
+        items = pd.DataFrame(
+            {
+                "item_id": ["i1"],
+                "cleaned_response": ["Hello friend."],
+                "cefr_sp_level": ["A1"],
+            }
+        )
+
+        def fake_predict(texts, *, models=None, device=None, batch_size=8):
+            return [
+                [
+                    {"key": "doc_en", "label": "NOT_A_LEVEL", "score": 0.99},
+                    {"key": "doc_sent_en", "label": "A1", "score": 0.40},
+                    {"key": "reference_alllang", "label": "A2", "score": 0.30},
+                ]
+            ]
+
+        with patch(
+            "slm_experiments.evaluation.assessment.cefr_tsar.predict_member_labels",
+            side_effect=fake_predict,
+        ):
+            scored = score_cefr_tsar(items)
+
+        row = scored.iloc[0]
+        assert row["cefr_tsar_status"] == "error"
+        assert "unnormalizable" in str(row["cefr_tsar_error"]).lower()
+        assert pd.isna(row["cefr_tsar_ensemble_label"]) or row[
+            "cefr_tsar_ensemble_label"
+        ] in (None, "")
+        assert pd.isna(row["cefr_tsar_ensemble_ordinal"]) or row[
+            "cefr_tsar_ensemble_ordinal"
+        ] in (None,)
         assert scored.iloc[0]["cefr_tsar_disagrees_with_cefr_sp"] is None or pd.isna(
             scored.iloc[0]["cefr_tsar_disagrees_with_cefr_sp"]
         )
@@ -402,6 +481,52 @@ class TestAssessmentSummary:
 
         assert "by_weight_factor" in summary
         assert "1" in summary["by_weight_factor"] or "1.0" in summary["by_weight_factor"]
+        # Single-family → one-element list (not overwritten string).
+        assert summary["metadata"]["sweep_dimension"] == ["weight_factor"]
+        assert "weight_factor" in summary["metadata"]["sweep_values"]
+
+    def test_sweep_dimension_list_for_mixed_families(self):
+        scores = pd.DataFrame(
+            [
+                {
+                    "item_id": "i1",
+                    "cefr_tsar_ensemble_ordinal": 1,
+                    "cefr_tsar_ensemble_label": "A1",
+                    "cefr_tsar_status": "ok",
+                    "cefr_tsar_disagrees_with_cefr_sp": False,
+                },
+            ]
+        )
+        item_map = pd.DataFrame(
+            [
+                {
+                    "item_id": "i1",
+                    "model": "Qwen3",
+                    "weight_factor": 1.0,
+                    "num_shots": 0,
+                    "generation_successful": True,
+                    "hit_max_tokens": False,
+                    "in_sample": True,
+                },
+                {
+                    "item_id": "i1",
+                    "model": "Qwen3",
+                    "weight_factor": 2.0,
+                    "num_shots": 3,
+                    "generation_successful": True,
+                    "hit_max_tokens": False,
+                    "in_sample": True,
+                },
+            ]
+        )
+        summary = compute_tsar_assessment_summary(scores, item_map)
+        dims = summary["metadata"]["sweep_dimension"]
+        assert isinstance(dims, list)
+        assert "weight_factor" in dims
+        assert "num_shots" in dims
+        assert set(dims) == set(summary["metadata"]["sweep_values"].keys())
+        assert "by_weight_factor" in summary
+        assert "by_num_shots" in summary
 
 
 class TestBundleIntegration:
@@ -486,3 +611,102 @@ class TestBundleIntegration:
 
         # C1: meets_a1_criteria still CEFR-SP only on source; TSAR never gates.
         assert "meets_a1_criteria" not in scores.columns
+
+
+class TestTsarDeviceBatchPassthrough:
+    def test_score_cefr_tsar_forwards_device_and_batch_size(self):
+        items = pd.DataFrame(
+            {
+                "item_id": ["i1"],
+                "cleaned_response": ["Hello friend."],
+                "cefr_sp_level": ["A1"],
+                "generation_successful": [True],
+            }
+        )
+        seen: dict = {}
+
+        def fake_predict(texts, *, models=None, device=None, batch_size=8):
+            seen["device"] = device
+            seen["batch_size"] = batch_size
+            return [
+                [
+                    {"key": "doc_en", "label": "A1", "score": 0.9},
+                    {"key": "doc_sent_en", "label": "A1", "score": 0.8},
+                    {"key": "reference_alllang", "label": "A1", "score": 0.7},
+                ]
+            ]
+
+        with patch(
+            "slm_experiments.evaluation.assessment.cefr_tsar.predict_member_labels",
+            side_effect=fake_predict,
+        ):
+            score_cefr_tsar(items, device="cpu", batch_size=16)
+
+        assert seen["device"] == "cpu"
+        assert seen["batch_size"] == 16
+
+    def test_score_items_scorer_options_reach_tsar(self):
+        from slm_experiments.evaluation.assessment.scorers import (
+            clear_scorers,
+            score_items,
+        )
+
+        clear_scorers()
+        ensure_registered()
+        items = pd.DataFrame(
+            {
+                "item_id": ["i1"],
+                "cleaned_response": ["Hello friend."],
+                "cefr_sp_level": ["A1"],
+                "generation_successful": [True],
+            }
+        )
+        seen: dict = {}
+
+        def fake_predict(texts, *, models=None, device=None, batch_size=8):
+            seen["device"] = device
+            seen["batch_size"] = batch_size
+            return [
+                [
+                    {"key": "doc_en", "label": "A1", "score": 0.9},
+                    {"key": "doc_sent_en", "label": "A1", "score": 0.8},
+                    {"key": "reference_alllang", "label": "A1", "score": 0.7},
+                ]
+            ]
+
+        with patch(
+            "slm_experiments.evaluation.assessment.cefr_tsar.predict_member_labels",
+            side_effect=fake_predict,
+        ):
+            score_items(
+                items,
+                scorer_options={"cefr_tsar": {"device": "mps", "batch_size": 4}},
+            )
+
+        assert seen == {"device": "mps", "batch_size": 4}
+        clear_scorers()
+
+    def test_cli_assess_build_exposes_tsar_flags(self):
+        from slm_experiments.cli import _build_parser
+
+        parser = _build_parser()
+        args = parser.parse_args(
+            [
+                "assess",
+                "build",
+                "--source-run-ids",
+                "run1",
+                "--cefr-tsar-device",
+                "cuda",
+                "--cefr-tsar-batch-size",
+                "32",
+            ]
+        )
+        assert args.cefr_tsar_device == "cuda"
+        assert args.cefr_tsar_batch_size == 32
+
+        defaults = parser.parse_args(
+            ["assess", "build", "--source-run-ids", "run1"]
+        )
+        assert defaults.cefr_tsar_device is None
+        assert defaults.cefr_tsar_batch_size == DEFAULT_BATCH_SIZE

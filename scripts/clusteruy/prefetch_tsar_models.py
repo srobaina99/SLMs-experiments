@@ -24,15 +24,14 @@ from typing import List, Optional, Sequence, Tuple
 CEFR_SP_BASE_REPO = "bert-base-cased"
 
 # Corpora required for KVL v2 (English WordNet lemmatizer + POS tagger).
-# ``resolve_lemmatizer_backend`` prefers NLTK whenever the package imports, even
-# when WordNet data is missing — without these, every KVL v2 row is status=error.
+# ``resolve_lemmatizer_backend`` probes WordNet before claiming NLTK; without
+# these, it falls through to simplemma. omw-1.4 is not needed for English.
 NLTK_RESOURCES: Tuple[str, ...] = (
     "punkt",
     "punkt_tab",
     "averaged_perceptron_tagger",
     "averaged_perceptron_tagger_eng",
     "wordnet",
-    "omw-1.4",
 )
 
 # (resource_name, nltk.data.find path)

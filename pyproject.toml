@@ -37,6 +37,10 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "slm_experiments.human" = ["rubrics/*.md"]
+"slm_experiments.evaluation.assessment" = [
+    "judge_rubrics/*.md",
+    "judge_schema/*.json",
+]
 
 [project.scripts]
 slm_experiments = "slm_experiments.cli:main"

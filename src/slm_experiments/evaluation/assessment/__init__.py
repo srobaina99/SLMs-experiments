@@ -7,6 +7,7 @@ from slm_experiments.evaluation.assessment.judge import (
     validate_judge_scores,
 )
 from slm_experiments.evaluation.assessment.scorers import (
+    ensure_scorer_registered,
     list_scorers,
     register_scorer,
     score_items,
@@ -20,6 +21,7 @@ __all__ = [
     "AssessmentBundler",
     "JudgeExporter",
     "JudgeImporter",
+    "ensure_scorer_registered",
     "list_scorers",
     "register_scorer",
     "score_items",

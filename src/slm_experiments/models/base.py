@@ -160,6 +160,7 @@ class BaseModelWrapper(ABC):
                 "error_message": (
                     f"Generation timed out after {self.timeout_seconds} seconds"
                 ),
+                "hit_max_tokens": False,
             }
         except Exception as exc:
             return {
@@ -167,6 +168,7 @@ class BaseModelWrapper(ABC):
                 "response_time_seconds": time.time() - start_time,
                 "generation_successful": False,
                 "error_message": str(exc),
+                "hit_max_tokens": False,
             }
 
         response = result.get("response") or ""
@@ -182,6 +184,7 @@ class BaseModelWrapper(ABC):
             ),
             "generation_successful": successful,
             "error_message": result.get("error_message", ""),
+            "hit_max_tokens": bool(result.get("hit_max_tokens", False)),
         }
 
     @abstractmethod

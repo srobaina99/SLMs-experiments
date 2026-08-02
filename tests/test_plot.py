@@ -120,3 +120,22 @@ class TestPlotRun:
             assert "nonexistent_run" in str(exc)
         else:
             raise AssertionError("Expected FileNotFoundError")
+
+    def test_plot_rejects_assessment_bundle(self, tmp_path: Path):
+        from slm_experiments.evaluation.assessment import AssessmentBundler
+
+        run_id, _out_dir, store = _build_factorial_bundle(tmp_path)
+        assess_id, _ = AssessmentBundler(results_root=tmp_path).build(
+            [run_id], seed=42
+        )
+        try:
+            plot_run(assess_id, results_root=tmp_path)
+        except ValueError as exc:
+            message = str(exc)
+            assert "assessment" in message.lower()
+            assert "assess analyze" in message
+        else:
+            raise AssertionError("Expected ValueError for assessment kind")
+        # Generation plot still works.
+        assert plot_run(run_id, results_root=tmp_path).exists()
+        assert store.run_dir(run_id).exists()

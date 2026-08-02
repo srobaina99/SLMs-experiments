@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional, Sequence, Union
 
 import pandas as pd
 
@@ -22,7 +22,7 @@ from slm_experiments.human.rubric import (
     RATING_MIN,
     RUBRIC_VERSION,
 )
-from slm_experiments.human.study_export import STUDY_DIRNAME
+from slm_experiments.human.study_export import DEFAULT_RATERS, STUDY_DIRNAME
 from slm_experiments.models.base import REPO_ROOT
 
 RATINGS_FILENAME = "ratings.csv"
@@ -33,14 +33,86 @@ REQUIRED_RATING_COLUMNS = ["item_id", "rater_id", *RATING_DIMENSIONS]
 
 
 def _normalize_rating(value) -> Optional[int]:
+    """Coerce a rating to an integer in ``[RATING_MIN, RATING_MAX]``.
+
+    Accepts plain ints and integral floats (e.g. ``3.0``, ``"3"``). Rejects
+    bools, non-integral floats (``3.9``), and non-integral numeric strings.
+    Missing values return ``None`` (caller treats as required-field error).
+    """
     if pd.isna(value) or value == "":
         return None
-    number = int(float(value))
+    # bool is a subclass of int; ratings are ordinal integers, not True/False.
+    if isinstance(value, bool):
+        raise ValueError(
+            f"rating must be an integer in [{RATING_MIN}, {RATING_MAX}], got {value!r}"
+        )
+    if isinstance(value, int):
+        number = value
+    elif isinstance(value, float):
+        if not value.is_integer():
+            raise ValueError(
+                f"rating must be an integer in [{RATING_MIN}, {RATING_MAX}], "
+                f"got {value!r}"
+            )
+        number = int(value)
+    else:
+        text = str(value).strip()
+        try:
+            as_float = float(text)
+        except ValueError as exc:
+            raise ValueError(
+                f"rating must be an integer in [{RATING_MIN}, {RATING_MAX}], "
+                f"got {value!r}"
+            ) from exc
+        if not as_float.is_integer():
+            raise ValueError(
+                f"rating must be an integer in [{RATING_MIN}, {RATING_MAX}], "
+                f"got {value!r}"
+            )
+        number = int(as_float)
     if number < RATING_MIN or number > RATING_MAX:
         raise ValueError(
             f"rating must be an integer in [{RATING_MIN}, {RATING_MAX}], got {value}"
         )
     return number
+
+
+def expected_raters_from_manifest(study_manifest: dict) -> list[str]:
+    """Return expected rater ids from the study export manifest (default three)."""
+    raw = study_manifest.get("raters")
+    if isinstance(raw, list) and raw:
+        return [str(r).strip() for r in raw if str(r).strip()]
+    return list(DEFAULT_RATERS)
+
+
+def filter_fully_rated_items(
+    ratings: pd.DataFrame,
+    expected_raters: Sequence[str],
+) -> tuple[pd.DataFrame, list[str]]:
+    """
+    Keep only items rated by every expected rater.
+
+    Returns ``(complete_ratings, incomplete_item_ids)``.
+    """
+    expected = {str(r) for r in expected_raters}
+    if not expected:
+        raise ValueError("expected_raters must be non-empty")
+    if ratings.empty:
+        return ratings.copy(), []
+
+    incomplete: list[str] = []
+    complete_ids: list[str] = []
+    for item_id, group in ratings.groupby("item_id", sort=False):
+        present = set(group["rater_id"].astype(str))
+        if expected <= present:
+            complete_ids.append(str(item_id))
+        else:
+            incomplete.append(str(item_id))
+
+    if not complete_ids:
+        return ratings.iloc[0:0].copy(), incomplete
+    mask = ratings["item_id"].astype(str).isin(complete_ids)
+    return ratings.loc[mask].copy(), incomplete
 
 
 def validate_ratings(
@@ -194,26 +266,69 @@ class StudyImporter:
 
         validated.to_csv(existing_path, index=False)
 
-        consensus = consensus_medians(validated)
-        consensus.to_csv(study_dir / CONSENSUS_FILENAME, index=False)
-
-        reliability = compute_reliability(validated)
-        reliability_path = study_dir / RELIABILITY_FILENAME
-        reliability_path.write_text(
-            json.dumps(reliability, indent=2), encoding="utf-8"
-        )
-
         study_manifest_path = study_dir / "manifest.json"
         study_manifest = {}
         if study_manifest_path.exists():
             study_manifest = json.loads(
                 study_manifest_path.read_text(encoding="utf-8")
             )
+        expected_raters = expected_raters_from_manifest(study_manifest)
+        complete, incomplete_ids = filter_fully_rated_items(
+            validated, expected_raters
+        )
+
+        consensus = consensus_medians(complete)
+        consensus.to_csv(study_dir / CONSENSUS_FILENAME, index=False)
+
+        if complete.empty:
+            reliability = {
+                "rubric_version": RUBRIC_VERSION,
+                "n_items": 0,
+                "n_raters": len(expected_raters),
+                "rater_ids": list(expected_raters),
+                "method": {
+                    "exact_agreement": "mean pairwise percent exact agreement",
+                    "adjacent_agreement": (
+                        "mean pairwise percent agreement within ±1"
+                    ),
+                    "consensus": "per-item median across raters",
+                    "krippendorff_alpha": "not computed (dropped by design)",
+                    "coverage": (
+                        "consensus/reliability require all expected raters "
+                        f"({', '.join(expected_raters)}) per item"
+                    ),
+                },
+                "by_dimension": {
+                    dim: {"exact_agreement": None, "adjacent_agreement": None}
+                    for dim in RATING_DIMENSIONS
+                },
+                "human_suitable_rate": None,
+                "consensus": [],
+                "incomplete_item_ids": incomplete_ids,
+            }
+        else:
+            reliability = compute_reliability(complete)
+            reliability["incomplete_item_ids"] = incomplete_ids
+            reliability["method"] = {
+                **reliability.get("method", {}),
+                "coverage": (
+                    "consensus/reliability require all expected raters "
+                    f"({', '.join(expected_raters)}) per item"
+                ),
+            }
+        reliability_path = study_dir / RELIABILITY_FILENAME
+        reliability_path.write_text(
+            json.dumps(reliability, indent=2), encoding="utf-8"
+        )
+
         study_manifest["rubric_version"] = RUBRIC_VERSION
         study_manifest["imported_at"] = datetime.now(timezone.utc).isoformat()
         study_manifest["n_ratings"] = int(len(validated))
         study_manifest["n_items_rated"] = int(validated["item_id"].nunique())
         study_manifest["n_raters"] = int(validated["rater_id"].nunique())
+        study_manifest["n_items_consensus"] = int(complete["item_id"].nunique())
+        study_manifest["n_items_incomplete"] = int(len(incomplete_ids))
+        study_manifest["expected_raters"] = list(expected_raters)
         artifacts = study_manifest.setdefault("artifacts", {})
         artifacts["ratings_csv"] = RATINGS_FILENAME
         artifacts["consensus_csv"] = CONSENSUS_FILENAME
@@ -230,14 +345,34 @@ class StudyImporter:
         human_study["imported_at"] = study_manifest["imported_at"]
         human_study["n_ratings"] = int(len(validated))
         human_study["n_items_rated"] = int(validated["item_id"].nunique())
+        human_study["n_items_consensus"] = int(complete["item_id"].nunique())
+        human_study["n_items_incomplete"] = int(len(incomplete_ids))
         assessment_manifest_path.write_text(
             json.dumps(assessment_manifest, indent=2), encoding="utf-8"
         )
+
+        warning = None
+        if incomplete_ids:
+            sample = incomplete_ids[:5]
+            more = (
+                f" (+{len(incomplete_ids) - 5} more)"
+                if len(incomplete_ids) > 5
+                else ""
+            )
+            warning = (
+                f"Skipped consensus/human_suitable for {len(incomplete_ids)} "
+                f"item(s) missing one or more expected raters "
+                f"{list(expected_raters)}; examples: {sample}{more}"
+            )
 
         return {
             "n_ratings": int(len(validated)),
             "n_items": int(validated["item_id"].nunique()),
             "n_raters": int(validated["rater_id"].nunique()),
+            "n_items_consensus": int(complete["item_id"].nunique()),
+            "n_items_incomplete": int(len(incomplete_ids)),
+            "incomplete_item_ids": incomplete_ids,
+            "warning": warning,
             "ratings_path": existing_path,
             "reliability_path": reliability_path,
             "consensus_path": study_dir / CONSENSUS_FILENAME,

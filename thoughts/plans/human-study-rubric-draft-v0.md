@@ -39,7 +39,7 @@ Checked against `human/export.py`, `human/import.py` (loaded via `importlib` bec
 ## 2. Study protocol sketch (for plan; not implemented here)
 
 - **Raters:** 3; same item set; independently seeded random order.
-- **Calibration:** small pilot set **excluded** from the analysis sample; default analysis n = **100** unique items with inclusion weights from stratified sampling. **Shipped caveat:** weights are \(P(\text{select} \mid \text{not in calibration})\), not unconditional against the original pool.
+- **Calibration:** small pilot set **excluded** from the analysis sample; default analysis n = **100** unique items with inclusion weights from stratified sampling. **Correction (post-ship nits #16/#20):** earlier draft caveat (conditional on post-calibration) superseded — weights are unconditional Horvitz–Thompson against the original pool (\(\pi_i = n_s / N_s\)); see `docs/human-eval.md` / Decision 4 in `evaluation-stack-plan.md`.
 - **Ratings per item:** four ordinal 1–4 dimensions (§3) + optional free-text notes.
 - **Consensus:** per item, per dimension = **median** across raters.
 - **Reliability (shipped):** mean pairwise **exact + adjacent (±1) percent agreement** per dimension. **Not** Krippendorff's α — see §6.

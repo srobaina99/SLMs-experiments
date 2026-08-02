@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Union
@@ -120,16 +121,113 @@ def write_judge_input_jsonl(
     return len(records)
 
 
-def _normalize_score(value: Any, *, column: str) -> int:
+def _normalize_score(
+    value: Any,
+    *,
+    column: str,
+    minimum: int = RATING_MIN,
+    maximum: int = RATING_MAX,
+) -> int:
+    """Coerce a score to an integer in ``[minimum, maximum]``.
+
+    Bounds come from the JSON schema when available. Accepts plain ints and
+    integral floats (e.g. ``3.0``, ``"3"``). Rejects bools, non-integral
+    floats (``3.9``), and non-integral numeric strings.
+    """
     if pd.isna(value) or value == "":
         raise ValueError(f"missing required score in column {column}")
-    number = int(float(value))
-    if number < RATING_MIN or number > RATING_MAX:
+    # bool is a subclass of int; schema wants integers, not True/False.
+    if isinstance(value, bool):
         raise ValueError(
-            f"score must be an integer in [{RATING_MIN}, {RATING_MAX}] "
+            f"score for {column} must be an integer in "
+            f"[{minimum}, {maximum}], got {value!r}"
+        )
+    if isinstance(value, int):
+        number = value
+    elif isinstance(value, float):
+        if not value.is_integer():
+            raise ValueError(
+                f"score for {column} must be an integer in "
+                f"[{minimum}, {maximum}], got {value!r}"
+            )
+        number = int(value)
+    else:
+        text = str(value).strip()
+        try:
+            as_float = float(text)
+        except ValueError as exc:
+            raise ValueError(
+                f"score for {column} must be an integer in "
+                f"[{minimum}, {maximum}], got {value!r}"
+            ) from exc
+        if not as_float.is_integer():
+            raise ValueError(
+                f"score for {column} must be an integer in "
+                f"[{minimum}, {maximum}], got {value!r}"
+            )
+        number = int(as_float)
+    if number < minimum or number > maximum:
+        raise ValueError(
+            f"score must be an integer in [{minimum}, {maximum}] "
             f"for {column}, got {value}"
         )
     return number
+
+
+def _schema_property_bounds(prop: Dict[str, Any]) -> tuple[Optional[int], Optional[int]]:
+    """Read minimum/maximum from a JSON Schema property object."""
+    minimum = prop.get("minimum")
+    maximum = prop.get("maximum")
+    min_i = int(minimum) if minimum is not None else None
+    max_i = int(maximum) if maximum is not None else None
+    return min_i, max_i
+
+
+def _validate_value_against_schema(
+    value: Any,
+    *,
+    column: str,
+    prop: Dict[str, Any],
+) -> Any:
+    """Apply JSON Schema type / enum / min / max constraints for one cell."""
+    allowed_types = prop.get("type")
+    if allowed_types is not None:
+        if isinstance(allowed_types, list):
+            type_opts = set(allowed_types)
+        else:
+            type_opts = {allowed_types}
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            if "null" not in type_opts:
+                raise ValueError(f"{column} must not be null")
+            return None
+        # string
+        if "string" in type_opts and "integer" not in type_opts:
+            text = "" if value is None or (isinstance(value, float) and pd.isna(value)) else str(value)
+            if "null" in type_opts and (value is None or (isinstance(value, float) and pd.isna(value))):
+                return None
+            min_len = prop.get("minLength")
+            if min_len is not None and len(text) < int(min_len):
+                raise ValueError(
+                    f"{column} must have minLength {min_len}, got {text!r}"
+                )
+            if "enum" in prop and text not in prop["enum"]:
+                raise ValueError(
+                    f"{column} must be one of {prop['enum']}, got {text!r}"
+                )
+            return text
+        if "integer" in type_opts:
+            minimum, maximum = _schema_property_bounds(prop)
+            return _normalize_score(
+                value,
+                column=column,
+                minimum=minimum if minimum is not None else RATING_MIN,
+                maximum=maximum if maximum is not None else RATING_MAX,
+            )
+    if "enum" in prop:
+        text = str(value)
+        if text not in [str(x) for x in prop["enum"]] and value not in prop["enum"]:
+            raise ValueError(f"{column} must be one of {prop['enum']}, got {value!r}")
+    return value
 
 
 def validate_judge_scores(
@@ -141,19 +239,23 @@ def validate_judge_scores(
     """
     Validate ``judge_scores.csv`` against the strict seam schema.
 
-    Enforces required columns, ordinal 1–4 dimensions matching the human
-    study, and exactly one row per ``item_id``. Optional ``notes``,
-    ``judge_id``, and ``rubric_version`` are retained when present.
+    Enforces required columns, property types / enums / min / max from the
+    JSON schema (ordinal 1–4 dimensions matching the human study), and
+    exactly one row per ``item_id``. Optional ``notes``, ``judge_id``, and
+    ``rubric_version`` are retained when present.
     """
-    # Touch schema so tests / callers confirm the committed contract exists.
     schema = schema if schema is not None else load_judge_schema()
+    properties: Dict[str, Any] = schema.get("properties") or {}
     required_props = schema.get("required", list(REQUIRED_SCORE_COLUMNS))
     missing = [col for col in required_props if col not in scores.columns]
     if missing:
         raise ValueError(f"judge_scores.csv missing columns: {missing}")
 
-    # Reject unknown columns beyond the documented optional set.
-    allowed = set(REQUIRED_SCORE_COLUMNS) | set(OPTIONAL_SCORE_COLUMNS)
+    # additionalProperties: false → reject undeclared columns.
+    if schema.get("additionalProperties", True) is False:
+        allowed = set(properties.keys())
+    else:
+        allowed = set(REQUIRED_SCORE_COLUMNS) | set(OPTIONAL_SCORE_COLUMNS)
     extra = [c for c in scores.columns if c not in allowed]
     if extra:
         raise ValueError(
@@ -162,6 +264,12 @@ def validate_judge_scores(
 
     working = scores.copy()
     working["item_id"] = working["item_id"].astype(str)
+    item_prop = properties.get("item_id", {})
+    if item_prop:
+        for idx, value in working["item_id"].items():
+            working.at[idx, "item_id"] = _validate_value_against_schema(
+                value, column="item_id", prop=item_prop
+            )
     if working["item_id"].str.strip().eq("").any():
         raise ValueError("item_id must be non-empty")
 
@@ -178,15 +286,39 @@ def validate_judge_scores(
         )
 
     for dim in RATING_DIMENSIONS:
-        working[dim] = [
-            _normalize_score(value, column=dim) for value in working[dim]
-        ]
+        prop = properties.get(dim, {})
+        if prop:
+            working[dim] = [
+                _validate_value_against_schema(value, column=dim, prop=prop)
+                for value in working[dim]
+            ]
+        else:
+            working[dim] = [
+                _normalize_score(value, column=dim) for value in working[dim]
+            ]
 
     if NOTES_COLUMN in working.columns:
+        prop = properties.get(NOTES_COLUMN, {"type": ["string", "null"]})
+        working[NOTES_COLUMN] = [
+            _validate_value_against_schema(v, column=NOTES_COLUMN, prop=prop)
+            for v in working[NOTES_COLUMN]
+        ]
         working[NOTES_COLUMN] = working[NOTES_COLUMN].astype("string")
     if "judge_id" in working.columns:
+        prop = properties.get("judge_id", {"type": ["string", "null"]})
+        working["judge_id"] = [
+            _validate_value_against_schema(v, column="judge_id", prop=prop)
+            for v in working["judge_id"]
+        ]
         working["judge_id"] = working["judge_id"].astype("string")
     if "rubric_version" in working.columns:
+        prop = properties.get("rubric_version", {"type": "string"})
+        working["rubric_version"] = [
+            _validate_value_against_schema(v, column="rubric_version", prop=prop)
+            if not (pd.isna(v) or v == "")
+            else v
+            for v in working["rubric_version"]
+        ]
         working["rubric_version"] = working["rubric_version"].astype("string")
         bad = working["rubric_version"].dropna()
         bad = bad[bad.astype(str).str.strip() != ""]
@@ -224,11 +356,19 @@ class JudgeExporter:
         root = Path(results_root) if results_root is not None else Path(REPO_ROOT) / "results"
         self.run_store = RunStore(root)
 
-    def export(self, assessment_run_id: str) -> tuple[Path, int]:
+    def export(
+        self,
+        assessment_run_id: str,
+        *,
+        force: bool = False,
+    ) -> tuple[Path, int]:
         """
         Build ``{assessment}/judge/judge_input.jsonl`` (+ rubric + schema).
 
         Returns ``(judge_dir, n_items)``.
+
+        Refuses to wipe an existing judge dir that already contains imported
+        ``judge_scores.csv`` unless ``force=True``.
         """
         run_dir = self.run_store.run_dir(assessment_run_id)
         if not run_dir.exists():
@@ -251,18 +391,35 @@ class JudgeExporter:
                 f"No judge-input records built from assessment {assessment_run_id}"
             )
 
+        if not JUDGE_RUBRIC_MARKDOWN.exists():
+            raise FileNotFoundError(
+                f"Judge rubric source missing: {JUDGE_RUBRIC_MARKDOWN}. "
+                f"Ensure package data includes judge_rubrics/."
+            )
+        if not JUDGE_SCHEMA_PATH.exists():
+            raise FileNotFoundError(
+                f"Judge schema source missing: {JUDGE_SCHEMA_PATH}. "
+                f"Ensure package data includes judge_schema/."
+            )
+
         judge_dir = run_dir / JUDGE_DIRNAME
         if judge_dir.exists():
+            scores_path = judge_dir / JUDGE_SCORES_FILENAME
+            if scores_path.exists() and not force:
+                raise FileExistsError(
+                    f"Judge directory already has imported scores "
+                    f"({JUDGE_SCORES_FILENAME}). Re-export would delete them. "
+                    f"Pass force=True / --force to overwrite, or keep the "
+                    f"existing judge artifacts."
+                )
             shutil.rmtree(judge_dir)
         judge_dir.mkdir(parents=True, exist_ok=True)
 
         input_path = judge_dir / JUDGE_INPUT_FILENAME
         n_items = write_judge_input_jsonl(records, input_path)
 
-        if JUDGE_RUBRIC_MARKDOWN.exists():
-            shutil.copy2(JUDGE_RUBRIC_MARKDOWN, judge_dir / JUDGE_RUBRIC_MARKDOWN.name)
-        if JUDGE_SCHEMA_PATH.exists():
-            shutil.copy2(JUDGE_SCHEMA_PATH, judge_dir / JUDGE_SCHEMA_PATH.name)
+        shutil.copy2(JUDGE_RUBRIC_MARKDOWN, judge_dir / JUDGE_RUBRIC_MARKDOWN.name)
+        shutil.copy2(JUDGE_SCHEMA_PATH, judge_dir / JUDGE_SCHEMA_PATH.name)
 
         created_at = datetime.now(timezone.utc).isoformat()
         judge_manifest: Dict[str, Any] = {
@@ -282,10 +439,8 @@ class JudgeExporter:
             "artifacts": {
                 "judge_input_jsonl": JUDGE_INPUT_FILENAME,
                 "judge_scores_csv": None,
-                "rubric": (
-                    JUDGE_RUBRIC_MARKDOWN.name if JUDGE_RUBRIC_MARKDOWN.exists() else None
-                ),
-                "schema": JUDGE_SCHEMA_PATH.name if JUDGE_SCHEMA_PATH.exists() else None,
+                "rubric": JUDGE_RUBRIC_MARKDOWN.name,
+                "schema": JUDGE_SCHEMA_PATH.name,
             },
         }
         (judge_dir / JUDGE_MANIFEST_FILENAME).write_text(
@@ -368,6 +523,19 @@ class JudgeImporter:
         raw = pd.read_csv(scores_file)
         validated = validate_judge_scores(raw, known_item_ids=known_ids)
 
+        n_expected = len(known_ids) if known_ids is not None else int(len(validated))
+        n_scored = int(validated["item_id"].nunique())
+        coverage_complete = n_scored >= n_expected and n_expected > 0
+        if n_expected > 0 and n_scored < n_expected:
+            missing_n = n_expected - n_scored
+            warnings.warn(
+                f"Partial judge coverage: imported scores for {n_scored} of "
+                f"{n_expected} items ({missing_n} missing). "
+                f"Quality-preservation claims should note incomplete coverage.",
+                UserWarning,
+                stacklevel=2,
+            )
+
         out_path = judge_dir / JUDGE_SCORES_FILENAME
         validated.to_csv(out_path, index=False)
 
@@ -380,7 +548,9 @@ class JudgeImporter:
             )
         judge_manifest["imported_at"] = imported_at
         judge_manifest["n_scores"] = int(len(validated))
-        judge_manifest["n_items_scored"] = int(validated["item_id"].nunique())
+        judge_manifest["n_items_scored"] = n_scored
+        judge_manifest["n_items_expected"] = n_expected
+        judge_manifest["coverage_complete"] = coverage_complete
         judge_manifest["api_adapter"] = None
         judge_manifest["quality_preservation_scope"] = QUALITY_PRESERVATION_SCOPE
         artifacts = judge_manifest.setdefault("artifacts", {})
@@ -396,7 +566,9 @@ class JudgeImporter:
         llm_judge = assessment_manifest.setdefault("llm_judge", {})
         llm_judge["imported_at"] = imported_at
         llm_judge["n_scores"] = int(len(validated))
-        llm_judge["n_items_scored"] = int(validated["item_id"].nunique())
+        llm_judge["n_items_scored"] = n_scored
+        llm_judge["n_items_expected"] = n_expected
+        llm_judge["coverage_complete"] = coverage_complete
         llm_judge["api_adapter"] = None
         llm_judge["quality_preservation_scope"] = QUALITY_PRESERVATION_SCOPE
         assessment_manifest_path.write_text(
@@ -405,7 +577,9 @@ class JudgeImporter:
 
         return {
             "n_scores": int(len(validated)),
-            "n_items": int(validated["item_id"].nunique()),
+            "n_items": n_scored,
+            "n_items_expected": n_expected,
+            "coverage_complete": coverage_complete,
             "scores_path": out_path,
             "judge_dir": judge_dir,
         }

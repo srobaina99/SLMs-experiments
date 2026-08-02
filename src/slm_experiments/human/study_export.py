@@ -24,12 +24,72 @@ from slm_experiments.human.rubric import (
 from slm_experiments.models.base import REPO_ROOT
 
 STUDY_DIRNAME = "study"
+# Only this subdirectory is safe to distribute to raters (no stratum / arm labels).
+RATER_PACKET_DIRNAME = "rater_packet"
+RATER_SHEETS_DIRNAME = "rater_sheets"
 DEFAULT_SAMPLE_SIZE = 100
 DEFAULT_CALIBRATION_SIZE = 10
 DEFAULT_SEED = 42
 DEFAULT_RATERS = ("r1", "r2", "r3")
 
+# Import writes these; re-export must not wipe them without --force.
+IMPORTED_STUDY_ARTIFACTS = ("ratings.csv", "consensus.csv", "reliability.json")
+
+# Columns that must never appear in the rater-facing packet.
+RATER_PACKET_FORBIDDEN_COLUMNS = frozenset(
+    {
+        "stratum",
+        "family",
+        "model",
+        "arm",
+        "cefr_band",
+        "disagreement",
+        "truncation",
+        "source_run_ids",
+        "experiment_ids",
+        "configs",
+        "inclusion_probability",
+        "inclusion_weight",
+        "role",
+    }
+)
+
 BLIND_COLUMNS = ["item_id", "prompt", "answer", *RATING_DIMENSIONS, NOTES_COLUMN]
+# Analyst-facing analysis sample (weights + stratum); lives outside rater_packet/.
+ANALYSIS_ITEM_COLUMNS = [
+    "item_id",
+    "prompt",
+    "answer",
+    "inclusion_probability",
+    "inclusion_weight",
+    "stratum",
+]
+
+
+def assert_rater_packet_columns_safe(columns: Sequence[str]) -> None:
+    """Raise if a rater-packet CSV would leak stratum / arm-identifying columns.
+
+    Complements the ``BLIND_COLUMNS`` whitelist: even if the whitelist is
+    accidentally widened, forbidden identifiers must never reach disk in
+    ``rater_packet/``.
+    """
+    leaked = sorted(set(columns) & RATER_PACKET_FORBIDDEN_COLUMNS)
+    if leaked:
+        raise ValueError(
+            "rater packet CSV would leak identifying columns "
+            f"(blinding hazard): {leaked}"
+        )
+
+
+def _prepare_rater_sheet_for_write(sheet: pd.DataFrame) -> pd.DataFrame:
+    """Select blind columns and fail closed if any forbidden identifier remains."""
+    # Guard the whitelist itself so a widened BLIND_COLUMNS cannot slip past
+    # a KeyError when the sheet frame lacks the leaked column.
+    assert_rater_packet_columns_safe(BLIND_COLUMNS)
+    out_sheet = sheet[BLIND_COLUMNS]
+    assert_rater_packet_columns_safe(out_sheet.columns.tolist())
+    return out_sheet
+
 SOURCE_KEY_COLUMNS = [
     "item_id",
     "prompt_id",
@@ -103,17 +163,50 @@ def disagreement_label(value: Any) -> str:
     return "disagree" if bool(value) else "agree"
 
 
+def _resolve_disagreement(score: pd.Series) -> Any:
+    """Populate TSAR↔CEFR-SP disagreement when TSAR fields are present.
+
+    Prefers the stored ``cefr_tsar_disagrees_with_cefr_sp`` flag; if that is
+    missing but both discrete labels exist, recomputes the flag. Returns
+    ``None`` when TSAR scores are absent (stratum stays ``unknown``).
+    """
+    disagree = None
+    if "cefr_tsar_disagrees_with_cefr_sp" in score.index:
+        disagree = score.get("cefr_tsar_disagrees_with_cefr_sp")
+    if not _is_missing(disagree):
+        return disagree
+
+    # TSAR absent → leave unknown; TSAR present with both labels → recompute.
+    if "cefr_tsar_ensemble_label" not in score.index:
+        return None
+    ensemble = score.get("cefr_tsar_ensemble_label")
+    if _is_missing(ensemble):
+        return None
+    from slm_experiments.evaluation.assessment.cefr_tsar import (
+        disagrees_with_cefr_sp,
+    )
+
+    return disagrees_with_cefr_sp(score.get("cefr_sp_level"), ensemble)
+
+
 def stratified_sample_with_weights(
     df: pd.DataFrame,
     n: int,
     *,
     stratum_col: str = "stratum",
     seed: int = DEFAULT_SEED,
+    inclusion_pool: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     """
     Sample up to ``n`` rows stratified by ``stratum_col``.
 
-    Adds ``inclusion_probability`` and ``inclusion_weight`` (= 1/p).
+    Adds ``inclusion_probability`` (``π_i``) and ``inclusion_weight`` (= 1/π_i).
+
+    Sampling allocation uses stratum sizes in ``df``. Inclusion probabilities
+    are computed against ``inclusion_pool`` when provided (else ``df``), so a
+    post-calibration analysis draw can report unconditional Horvitz–Thompson
+    weights vs the original pool: ``π_i = n_s / N_s`` where ``N_s`` is the
+    original stratum size.
     """
     if n <= 0:
         raise ValueError(f"sample size must be positive, got {n}")
@@ -124,6 +217,12 @@ def stratified_sample_with_weights(
         out["inclusion_probability"] = 1.0
         out["inclusion_weight"] = 1.0
         return out.reset_index(drop=True)
+
+    pool = inclusion_pool if inclusion_pool is not None else df
+    pool_sizes = {
+        name: int(len(group))
+        for name, group in pool.groupby(stratum_col, sort=False)
+    }
 
     groups = list(df.groupby(stratum_col, sort=False))
     num_groups = len(groups)
@@ -159,7 +258,9 @@ def stratified_sample_with_weights(
         if count <= 0:
             continue
         sampled = group.sample(n=count, random_state=seed).copy()
-        p = float(count) / float(len(group))
+        # Unconditional vs inclusion_pool: π = n_drawn / N_original_stratum.
+        pool_n = float(pool_sizes.get(name, len(group)))
+        p = float(count) / pool_n if pool_n > 0 else 0.0
         sampled["inclusion_probability"] = p
         sampled["inclusion_weight"] = 1.0 / p if p > 0 else float("inf")
         parts.append(sampled)
@@ -220,7 +321,7 @@ def build_item_frame(
             cefr_level = score.get("cefr_sp_level")
             if _is_missing(cefr_level):
                 cefr_level = score.get("cefr_tsar_ensemble_label")
-            disagree = score.get("cefr_tsar_disagrees_with_cefr_sp")
+            disagree = _resolve_disagreement(score)
         else:
             cefr_level = None
             disagree = None
@@ -274,11 +375,15 @@ class StudyExporter:
         calibration: int = DEFAULT_CALIBRATION_SIZE,
         seed: int = DEFAULT_SEED,
         raters: Sequence[str] = DEFAULT_RATERS,
+        force: bool = False,
     ) -> tuple[Path, int]:
         """
         Build study artifacts under ``{assessment}/study/``.
 
         Returns ``(study_dir, analysis_item_count)``.
+
+        Refuses to wipe an existing study dir that already contains imported
+        ratings unless ``force=True``.
         """
         if sample <= 0:
             raise ValueError(f"sample size must be positive, got {sample}")
@@ -311,12 +416,18 @@ class StudyExporter:
             )
 
         # Calibration pilot drawn first and excluded from the analysis sample.
+        # Inclusion weights for both draws use the original pool (pre-calibration)
+        # so analysis π_i = n_s / N_s is unconditional Horvitz–Thompson.
         calibration_df = pd.DataFrame(columns=frame.columns)
         remaining = frame
         if calibration > 0 and len(frame) > 0:
             cal_n = min(calibration, len(frame))
             calibration_df = stratified_sample_with_weights(
-                frame, cal_n, stratum_col="stratum", seed=seed
+                frame,
+                cal_n,
+                stratum_col="stratum",
+                seed=seed,
+                inclusion_pool=frame,
             )
             calibration_df = calibration_df.copy()
             calibration_df["role"] = "calibration"
@@ -331,14 +442,31 @@ class StudyExporter:
             )
         # Distinct seed offset so analysis draw differs from calibration draw.
         analysis_df = stratified_sample_with_weights(
-            remaining, analysis_n, stratum_col="stratum", seed=seed + 1
+            remaining,
+            analysis_n,
+            stratum_col="stratum",
+            seed=seed + 1,
+            inclusion_pool=frame,
         )
         analysis_df = analysis_df.copy()
         analysis_df["role"] = "analysis"
 
         study_dir = run_dir / STUDY_DIRNAME
-        sheets_dir = study_dir / "rater_sheets"
+        rater_packet_dir = study_dir / RATER_PACKET_DIRNAME
+        sheets_dir = rater_packet_dir / RATER_SHEETS_DIRNAME
         if study_dir.exists():
+            imported = [
+                name
+                for name in IMPORTED_STUDY_ARTIFACTS
+                if (study_dir / name).exists()
+            ]
+            if imported and not force:
+                raise FileExistsError(
+                    f"Study directory already has imported ratings "
+                    f"({', '.join(imported)}). Re-export would delete them. "
+                    f"Pass force=True / --force to overwrite, or keep the "
+                    f"existing study artifacts."
+                )
             shutil.rmtree(study_dir)
         sheets_dir.mkdir(parents=True, exist_ok=True)
 
@@ -350,16 +478,14 @@ class StudyExporter:
         source_key_path = study_dir / "source_key.csv"
         source_key[SOURCE_KEY_COLUMNS].to_csv(source_key_path, index=False)
 
-        # Shared analysis item set (blind columns only for rater-facing sheets).
-        analysis_items = analysis_df[
-            ["item_id", "prompt", "answer", "inclusion_probability", "inclusion_weight", "stratum"]
-        ].copy()
+        # Analyst-only: stratum / weights stay outside the rater packet.
+        analysis_items = analysis_df[ANALYSIS_ITEM_COLUMNS].copy()
         analysis_items.to_csv(study_dir / "analysis_items.csv", index=False)
 
         if not calibration_df.empty:
-            calibration_df[
-                ["item_id", "prompt", "answer", "inclusion_probability", "inclusion_weight", "stratum"]
-            ].to_csv(study_dir / "calibration_items.csv", index=False)
+            calibration_df[ANALYSIS_ITEM_COLUMNS].to_csv(
+                study_dir / "calibration_items.csv", index=False
+            )
 
         for offset, rater_id in enumerate(raters):
             sheet = analysis_df[["item_id", "prompt", "answer"]].copy()
@@ -370,12 +496,12 @@ class StudyExporter:
             for dim in RATING_DIMENSIONS:
                 sheet[dim] = pd.Series([pd.NA] * len(sheet), dtype="Int64")
             sheet[NOTES_COLUMN] = pd.Series([pd.NA] * len(sheet), dtype="string")
-            sheet[BLIND_COLUMNS].to_csv(
+            _prepare_rater_sheet_for_write(sheet).to_csv(
                 sheets_dir / f"rater_{rater_id}.csv", index=False
             )
 
         if RUBRIC_MARKDOWN.exists():
-            shutil.copy2(RUBRIC_MARKDOWN, study_dir / RUBRIC_MARKDOWN.name)
+            shutil.copy2(RUBRIC_MARKDOWN, rater_packet_dir / RUBRIC_MARKDOWN.name)
 
         study_manifest: Dict[str, Any] = {
             "kind": "human_study",
@@ -398,14 +524,20 @@ class StudyExporter:
             ],
             "blind_columns": ["item_id", "prompt", "answer"],
             "rating_dimensions": list(RATING_DIMENSIONS),
+            "distribute_to_raters": RATER_PACKET_DIRNAME,
             "artifacts": {
                 "source_key_csv": "source_key.csv",
                 "analysis_items_csv": "analysis_items.csv",
                 "calibration_items_csv": (
                     "calibration_items.csv" if not calibration_df.empty else None
                 ),
-                "rater_sheets_dir": "rater_sheets",
-                "rubric": RUBRIC_MARKDOWN.name if RUBRIC_MARKDOWN.exists() else None,
+                "rater_packet_dir": RATER_PACKET_DIRNAME,
+                "rater_sheets_dir": f"{RATER_PACKET_DIRNAME}/{RATER_SHEETS_DIRNAME}",
+                "rubric": (
+                    f"{RATER_PACKET_DIRNAME}/{RUBRIC_MARKDOWN.name}"
+                    if RUBRIC_MARKDOWN.exists()
+                    else None
+                ),
             },
             "pool_size": int(len(frame)),
             "n_strata": int(frame["stratum"].nunique()),

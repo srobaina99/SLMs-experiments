@@ -21,6 +21,7 @@ from slm_experiments.core.run_store import (
     make_run_id,
 )
 from slm_experiments.evaluation.assessment import AssessmentBundler
+from slm_experiments.evaluation.assessment.cefr_tsar import DEFAULT_BATCH_SIZE
 from slm_experiments.evaluation.assessment.scorers import (
     clear_scorers,
     list_scorers,
@@ -139,6 +140,7 @@ def _pipeline_results_with_failures(tmp_path: Path) -> tuple[str, RunStore]:
     # Force empty cleaned_response on failures (formatter may leave empty anyway).
     fail_a.cleaned_response = ""
     fail_b.cleaned_response = ""
+    fail_a.hit_max_tokens = True
 
     store = RunStore(tmp_path)
     run_id = _write_generation_bundle(
@@ -195,8 +197,18 @@ class TestAssessmentBundle:
         assert "rubric_version" in manifest
         assert "scorer_revisions" in manifest
         assert "dependency_versions" in manifest
+        assert "code_revision" in manifest
+        rev = manifest["code_revision"]
+        assert set(rev) >= {"git_commit", "git_describe", "dirty"}
+        # Null-safe shape: values are str/bool or None (never raises).
+        assert rev["git_commit"] is None or isinstance(rev["git_commit"], str)
+        assert rev["git_describe"] is None or isinstance(rev["git_describe"], str)
+        assert rev["dirty"] is None or isinstance(rev["dirty"], bool)
         assert "sampling" in manifest
         assert "seed" in manifest
+        assert "cefr_tsar" in manifest
+        assert manifest["cefr_tsar"]["batch_size"] == DEFAULT_BATCH_SIZE
+        assert manifest["cefr_tsar"]["device"] is None
 
         obs = manifest["observations"]
         assert obs["total"] == 5  # all source rows
@@ -205,6 +217,7 @@ class TestAssessmentBundle:
         assert obs["total"] == obs["successful"] + obs["failed"]
         assert obs["items"] == 2
         assert obs["item_map_rows"] == 5
+        assert "hit_max_tokens" in obs
 
         # Two unique successful texts (p01 shared by two models + p02), not 3.
         assert len(items) == 2
@@ -215,6 +228,7 @@ class TestAssessmentBundle:
         failure_rows = item_map[item_map["generation_successful"] == False]  # noqa: E712
         assert len(failure_rows) == 2
         assert (failure_rows["item_id"].fillna("") == "").all()
+        assert failure_rows["hit_max_tokens"].astype(bool).sum() == 1
         assert (failure_rows["in_sample"] == False).all()  # noqa: E712
 
         # Shared successful text → one item_id, two source rows.
@@ -367,3 +381,73 @@ class TestKindAwareRuns:
         out = capsys.readouterr().out
         assert "Assessment bundle complete:" in out
         assert "_assessment_beginner_suitability" in out
+
+    def test_cli_assess_build_forwards_tsar_options(self, monkeypatch, capsys):
+        """CLI assess build passes --cefr-tsar-* into AssessmentBundler.build."""
+        captured: dict = {}
+
+        def fake_build(self, source_run_ids, **kwargs):
+            captured["source_run_ids"] = list(source_run_ids)
+            captured.update(kwargs)
+            return "fake_assessment_id", Path("/tmp/fake_assessment")
+
+        monkeypatch.setattr(AssessmentBundler, "build", fake_build)
+        main(
+            [
+                "assess",
+                "build",
+                "--source-run-ids",
+                "run_a",
+                "run_b",
+                "--cefr-tsar-device",
+                "cpu",
+                "--cefr-tsar-batch-size",
+                "16",
+                "--no-plot",
+            ]
+        )
+        out = capsys.readouterr().out
+        assert "Assessment bundle complete: fake_assessment_id" in out
+        assert captured["source_run_ids"] == ["run_a", "run_b"]
+        assert captured["cefr_tsar_device"] == "cpu"
+        assert captured["cefr_tsar_batch_size"] == 16
+
+    def test_probe_code_revision_shape_and_fallback(self, monkeypatch):
+        from slm_experiments.evaluation.assessment.bundle import probe_code_revision
+
+        # Happy path with mocked git.
+        responses = {
+            ("rev-parse", "HEAD"): "abc123def",
+            ("describe", "--tags", "--always", "--dirty"): "v0-1-gabc123def-dirty",
+            ("status", "--porcelain"): " M file.py\n",
+        }
+
+        def fake_run(args, cwd=None, capture_output=None, text=None, timeout=None, check=None):
+            key = tuple(args[1:])
+            out = responses.get(key, "")
+            class Done:
+                returncode = 0 if key in responses else 1
+                stdout = out
+                stderr = ""
+            return Done()
+
+        monkeypatch.setattr(
+            "subprocess.run",
+            fake_run,
+        )
+        rev = probe_code_revision(repo_root="/tmp")
+        assert rev["git_commit"] == "abc123def"
+        assert rev["git_describe"] == "v0-1-gabc123def-dirty"
+        assert rev["dirty"] is True
+
+        # Unavailable git → null-safe empty shape, never raises.
+        def boom(*_a, **_k):
+            raise FileNotFoundError("git missing")
+
+        monkeypatch.setattr("subprocess.run", boom)
+        empty = probe_code_revision(repo_root="/tmp")
+        assert empty == {
+            "git_commit": None,
+            "git_describe": None,
+            "dirty": None,
+        }

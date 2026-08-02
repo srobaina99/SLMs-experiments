@@ -189,6 +189,46 @@ class TestValidateJudgeScores:
         with pytest.raises(ValueError, match="unknown item_id"):
             validate_judge_scores(scores, known_item_ids={"a"})
 
+    def test_rejects_non_integral_and_bool_scores(self):
+        from slm_experiments.evaluation.assessment.judge import _normalize_score
+
+        dim = RATING_DIMENSIONS[0]
+        assert _normalize_score(3, column=dim) == 3
+        assert _normalize_score(3.0, column=dim) == 3
+        assert _normalize_score("3", column=dim) == 3
+        assert _normalize_score("3.0", column=dim) == 3
+        with pytest.raises(ValueError, match="must be an integer"):
+            _normalize_score(3.9, column=dim)
+        with pytest.raises(ValueError, match="must be an integer"):
+            _normalize_score("3.5", column=dim)
+        with pytest.raises(ValueError, match="must be an integer"):
+            _normalize_score(True, column=dim)
+
+        scores = pd.DataFrame(
+            [{"item_id": "a", **{d: 3.9 for d in RATING_DIMENSIONS}}]
+        )
+        with pytest.raises(ValueError, match="must be an integer"):
+            validate_judge_scores(scores)
+
+    def test_schema_declared_maximum_constrains_import(self):
+        """Editing schema max/min must change validation — not hardcoded-only."""
+        schema = load_judge_schema()
+        # Tighten maximum to 3 while keeping type integer.
+        tight = json.loads(json.dumps(schema))
+        for dim in RATING_DIMENSIONS:
+            tight["properties"][dim]["maximum"] = 3
+
+        ok = pd.DataFrame(
+            [{"item_id": "a", **{d: 3 for d in RATING_DIMENSIONS}}]
+        )
+        validate_judge_scores(ok, schema=tight)
+
+        too_high = pd.DataFrame(
+            [{"item_id": "a", **{d: 4 for d in RATING_DIMENSIONS}}]
+        )
+        with pytest.raises(ValueError, match=r"\[1, 3\]"):
+            validate_judge_scores(too_high, schema=tight)
+
 
 class TestJudgeExportImport:
     def test_export_builds_jsonl_and_copies_assets(self, tmp_path: Path):
@@ -256,6 +296,8 @@ class TestJudgeExportImport:
         )
         assert summary["n_scores"] == n_items
         assert summary["n_items"] == n_items
+        assert summary["n_items_expected"] == n_items
+        assert summary["coverage_complete"] is True
         stored = pd.read_csv(judge_dir / JUDGE_SCORES_FILENAME)
         assert set(stored["item_id"]) == set(item_ids)
         for dim in RATING_DIMENSIONS:
@@ -265,7 +307,100 @@ class TestJudgeExportImport:
             (store.run_dir(assess_id) / "manifest.json").read_text()
         )
         assert assess_manifest["llm_judge"]["n_scores"] == n_items
+        assert assess_manifest["llm_judge"]["coverage_complete"] is True
         assert assess_manifest["llm_judge"]["api_adapter"] is None
+
+    def test_partial_coverage_warns_and_records_stats(self, tmp_path: Path):
+        assess_id, store = _build_assessment_bundle(tmp_path)
+        judge_dir, n_items = JudgeExporter(results_root=tmp_path).export(assess_id)
+        assert n_items >= 2
+
+        item_ids = []
+        with (judge_dir / JUDGE_INPUT_FILENAME).open(encoding="utf-8") as handle:
+            for line in handle:
+                item_ids.append(json.loads(line)["item_id"])
+
+        # Import scores for only the first item.
+        partial = pd.DataFrame(
+            [
+                {
+                    "item_id": item_ids[0],
+                    **{d: 3 for d in RATING_DIMENSIONS},
+                    "judge_id": "partial",
+                }
+            ]
+        )
+        scores_path = tmp_path / "partial_judge_scores.csv"
+        partial.to_csv(scores_path, index=False)
+
+        with pytest.warns(UserWarning, match="Partial judge coverage"):
+            summary = JudgeImporter(results_root=tmp_path).import_scores(
+                assess_id, scores_path
+            )
+
+        assert summary["n_scores"] == 1
+        assert summary["n_items"] == 1
+        assert summary["n_items_expected"] == n_items
+        assert summary["coverage_complete"] is False
+
+        judge_manifest = json.loads((judge_dir / "manifest.json").read_text())
+        assert judge_manifest["n_items_scored"] == 1
+        assert judge_manifest["n_items_expected"] == n_items
+        assert judge_manifest["coverage_complete"] is False
+
+        assess_manifest = json.loads(
+            (store.run_dir(assess_id) / "manifest.json").read_text()
+        )
+        assert assess_manifest["llm_judge"]["coverage_complete"] is False
+        assert assess_manifest["llm_judge"]["n_items_expected"] == n_items
+
+    def test_reexport_refuses_to_wipe_imported_scores(self, tmp_path: Path):
+        assess_id, store = _build_assessment_bundle(tmp_path)
+        exporter = JudgeExporter(results_root=tmp_path)
+        judge_dir, n_items = exporter.export(assess_id)
+
+        item_ids = []
+        with (judge_dir / JUDGE_INPUT_FILENAME).open(encoding="utf-8") as handle:
+            for line in handle:
+                item_ids.append(json.loads(line)["item_id"])
+        placeholder = pd.DataFrame(
+            [
+                {"item_id": item_id, **{d: 3 for d in RATING_DIMENSIONS}}
+                for item_id in item_ids
+            ]
+        )
+        scores_path = tmp_path / "scores.csv"
+        placeholder.to_csv(scores_path, index=False)
+        JudgeImporter(results_root=tmp_path).import_scores(assess_id, scores_path)
+        assert (judge_dir / JUDGE_SCORES_FILENAME).exists()
+
+        with pytest.raises(FileExistsError, match="imported scores"):
+            exporter.export(assess_id)
+        assert (judge_dir / JUDGE_SCORES_FILENAME).exists()
+
+        exporter.export(assess_id, force=True)
+        assert not (store.run_dir(assess_id) / JUDGE_DIRNAME / JUDGE_SCORES_FILENAME).exists()
+        assert (store.run_dir(assess_id) / JUDGE_DIRNAME / JUDGE_INPUT_FILENAME).exists()
+
+    def test_export_fails_loudly_if_rubric_missing(self, tmp_path: Path):
+        assess_id, _store = _build_assessment_bundle(tmp_path)
+        missing = tmp_path / "missing_rubric.md"
+        with patch(
+            "slm_experiments.evaluation.assessment.judge.JUDGE_RUBRIC_MARKDOWN",
+            missing,
+        ):
+            with pytest.raises(FileNotFoundError, match="Judge rubric source missing"):
+                JudgeExporter(results_root=tmp_path).export(assess_id)
+
+    def test_export_fails_loudly_if_schema_missing(self, tmp_path: Path):
+        assess_id, _store = _build_assessment_bundle(tmp_path)
+        missing = tmp_path / "missing_schema.json"
+        with patch(
+            "slm_experiments.evaluation.assessment.judge.JUDGE_SCHEMA_PATH",
+            missing,
+        ):
+            with pytest.raises(FileNotFoundError, match="Judge schema source missing"):
+                JudgeExporter(results_root=tmp_path).export(assess_id)
 
     def test_build_records_from_items_frame(self):
         items = pd.DataFrame(
@@ -301,7 +436,8 @@ class TestJudgeCli:
         )
 
         mock_exporter.export.assert_called_once_with(
-            "20260801_120000_assessment_beginner_suitability"
+            "20260801_120000_assessment_beginner_suitability",
+            force=False,
         )
         captured = capsys.readouterr()
         assert "42" in captured.out
@@ -312,6 +448,8 @@ class TestJudgeCli:
         mock_importer.import_scores.return_value = {
             "n_scores": 42,
             "n_items": 42,
+            "n_items_expected": 42,
+            "coverage_complete": True,
             "scores_path": Path("/tmp/run/judge/judge_scores.csv"),
             "judge_dir": Path("/tmp/run/judge"),
         }

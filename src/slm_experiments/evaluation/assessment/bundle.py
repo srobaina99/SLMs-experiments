@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Sequence, Union
 
 import pandas as pd
 
+from slm_experiments.core.config_label import config_label
 from slm_experiments.core.run_store import (
     KIND_ASSESSMENT,
     RunStore,
@@ -22,6 +23,7 @@ from slm_experiments.evaluation.assessment.scorers import (
     scorer_revisions,
 )
 from slm_experiments.evaluation.assessment.cefr_tsar import (
+    DEFAULT_BATCH_SIZE as TSAR_DEFAULT_BATCH_SIZE,
     compute_tsar_assessment_summary,
     ensure_registered as ensure_tsar_registered,
 )
@@ -29,10 +31,10 @@ from slm_experiments.evaluation.assessment.kvl_v2 import (
     compute_kvl_v2_assessment_summary,
     ensure_registered as ensure_kvl_v2_registered,
 )
+from slm_experiments.human.rubric import RUBRIC_VERSION
 
 ASSESSMENT_PHASE = "assessment"
 ASSESSMENT_EXPERIMENT = "beginner_suitability"
-RUBRIC_VERSION = "beginner_suitability_rubric_v0"
 
 ITEMS_FILENAME = "items.csv"
 ITEM_MAP_FILENAME = "item_map.csv"
@@ -78,16 +80,6 @@ _TRACKED_DEPS = (
 )
 
 
-def _config_label(config_weighting: bool, config_prompting: bool) -> str:
-    if config_weighting and config_prompting:
-        return "both"
-    if config_weighting:
-        return "weighting_only"
-    if config_prompting:
-        return "prompting_only"
-    return "control"
-
-
 def _dependency_versions() -> Dict[str, str]:
     versions: Dict[str, str] = {}
     for name in _TRACKED_DEPS:
@@ -102,6 +94,54 @@ def _dependency_versions() -> Dict[str, str]:
 
         versions["slm_experiments"] = __version__
     return versions
+
+
+def probe_code_revision(repo_root: Optional[Union[Path, str]] = None) -> Dict[str, Any]:
+    """Best-effort git revision metadata for assessment manifests.
+
+    Never raises: unavailable git / non-checkout → null fields.
+    """
+    empty: Dict[str, Any] = {
+        "git_commit": None,
+        "git_describe": None,
+        "dirty": None,
+    }
+    try:
+        import subprocess
+
+        if repo_root is not None:
+            cwd = str(Path(repo_root))
+        else:
+            from slm_experiments.models.base import REPO_ROOT as root
+
+            cwd = str(root)
+
+        def _git(*args: str) -> Optional[str]:
+            completed = subprocess.run(
+                ["git", *args],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            if completed.returncode != 0:
+                return None
+            return completed.stdout.strip() or None
+
+        commit = _git("rev-parse", "HEAD")
+        if commit is None:
+            return empty
+        describe = _git("describe", "--tags", "--always", "--dirty")
+        porcelain = _git("status", "--porcelain")
+        dirty: Optional[bool] = None if porcelain is None else bool(porcelain)
+        return {
+            "git_commit": commit,
+            "git_describe": describe,
+            "dirty": dirty,
+        }
+    except Exception:  # noqa: BLE001 — never fail assess build on git probe
+        return empty
 
 
 def _bool_series(series: pd.Series) -> pd.Series:
@@ -136,12 +176,17 @@ class AssessmentBundler:
         seed: int = DEFAULT_SEED,
         cli_args: Optional[List[str]] = None,
         started_at: Optional[datetime] = None,
+        cefr_tsar_device: Optional[str] = None,
+        cefr_tsar_batch_size: int = TSAR_DEFAULT_BATCH_SIZE,
     ) -> tuple[str, Path]:
         """
         Build ``results/runs/{ts}_assessment_beginner_suitability/``.
 
         Reads each source via ``RunStore.read_full_csv`` only — never writes
         back to source runs. Returns ``(run_id, out_dir)``.
+
+        ``cefr_tsar_device`` / ``cefr_tsar_batch_size`` pass through to the
+        TSAR scorer (defaults preserve auto-detect device + batch size 8).
         """
         if not source_run_ids:
             raise ValueError("at least one source_run_id is required")
@@ -188,7 +233,15 @@ class AssessmentBundler:
 
         ensure_tsar_registered()
         ensure_kvl_v2_registered()
-        scores_df = score_items(items_for_scoring)
+        scores_df = score_items(
+            items_for_scoring,
+            scorer_options={
+                "cefr_tsar": {
+                    "device": cefr_tsar_device,
+                    "batch_size": int(cefr_tsar_batch_size),
+                }
+            },
+        )
         if scores_df.empty and "item_id" in items_df.columns:
             scores_df = items_df[["item_id"]].copy()
         scores_df.to_csv(scores_path, index=False)
@@ -234,8 +287,13 @@ class AssessmentBundler:
             "scorer_revisions": scorer_revisions(),
             "registered_scorers": list_scorers(),
             "dependency_versions": _dependency_versions(),
+            "code_revision": probe_code_revision(),
             "sampling": sampling_meta,
             "seed": seed,
+            "cefr_tsar": {
+                "device": cefr_tsar_device,
+                "batch_size": int(cefr_tsar_batch_size),
+            },
             "observations": {
                 # total / successful / failed / hit_max_tokens = source-row counts
                 "total": source_total,
@@ -327,7 +385,7 @@ class AssessmentBundler:
             working["hit_max_tokens"] = False
 
         working["config"] = working.apply(
-            lambda row: _config_label(
+            lambda row: config_label(
                 bool(row.get("config_weighting", False)),
                 bool(row.get("config_prompting", False)),
             ),

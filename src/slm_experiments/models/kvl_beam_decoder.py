@@ -131,6 +131,7 @@ class KvlBeamDecodeResult:
     words_scored: int
     running_mean: float | None
     candidates_pruned: int
+    hit_max_tokens: bool = False
 
 
 class KvlBeamDecoder:
@@ -176,6 +177,7 @@ class KvlBeamDecoder:
         candidates_pruned = 0
         steps_total = 0
         best_survivor: KvlBeamCandidate | None = None
+        hit_max_tokens = False
 
         for _ in range(max_tokens):
             if not active_beams:
@@ -207,6 +209,7 @@ class KvlBeamDecoder:
                                 prompt_token_ids,
                                 steps_total=steps_total,
                                 candidates_pruned=candidates_pruned,
+                                hit_max_tokens=False,
                             )
                         continue
                     children.append(child)
@@ -216,6 +219,9 @@ class KvlBeamDecoder:
             active_beams = children[: self.beam_width]
             if active_beams:
                 best_survivor = max(active_beams, key=self._rank_key)
+        else:
+            # Exhausted the token budget without a finished non-empty candidate.
+            hit_max_tokens = max_tokens > 0
 
         for beam in active_beams:
             self._flush_candidate_words(beam)
@@ -238,6 +244,7 @@ class KvlBeamDecoder:
             prompt_token_ids,
             steps_total=steps_total,
             candidates_pruned=candidates_pruned,
+            hit_max_tokens=hit_max_tokens,
         )
 
     @staticmethod
@@ -247,6 +254,7 @@ class KvlBeamDecoder:
         *,
         steps_total: int,
         candidates_pruned: int,
+        hit_max_tokens: bool = False,
     ) -> KvlBeamDecodeResult:
         generated_ids = candidate.token_ids[len(prompt_token_ids) :]
         return KvlBeamDecodeResult(
@@ -257,6 +265,7 @@ class KvlBeamDecoder:
             words_scored=len(candidate.kvl_scores),
             running_mean=candidate.kvl_running_mean(),
             candidates_pruned=candidates_pruned,
+            hit_max_tokens=hit_max_tokens,
         )
 
     def _extend_candidate(

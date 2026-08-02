@@ -119,12 +119,13 @@ _FUNCTION_WORDS_FALLBACK = frozenset(
 
 if NLTK_AVAILABLE:
     # NLTK 3.8+: averaged_perceptron_tagger_eng; older: averaged_perceptron_tagger.
+    # English WordNet lemmatization does not need omw-1.4 (skip; avoids offline
+    # download attempts that fail and are unused for EN lemmas).
     for resource, kind in (
         ("punkt", "tokenizers"),
         ("averaged_perceptron_tagger_eng", "taggers"),
         ("averaged_perceptron_tagger", "taggers"),
         ("wordnet", "corpora"),
-        ("omw-1.4", "corpora"),
     ):
         try:
             nltk.data.find(f"{kind}/{resource}")
@@ -152,18 +153,43 @@ _LEMMATIZER_BACKEND: Optional[str] = None
 _WORDNET_LEMMATIZER: Any = None
 
 
+def reset_lemmatizer_backend_cache() -> None:
+    """Clear cached lemmatizer selection (tests / forced re-probe)."""
+    global _LEMMATIZER_BACKEND, _WORDNET_LEMMATIZER
+    _LEMMATIZER_BACKEND = None
+    _WORDNET_LEMMATIZER = None
+
+
+def _probe_wordnet_lemmatizer() -> Any:
+    """Return a working WordNetLemmatizer, or None if WordNet data is unusable."""
+    if not NLTK_AVAILABLE or WordNetLemmatizer is None:
+        return None
+    try:
+        lemmatizer = WordNetLemmatizer()
+        # Instantiating succeeds without corpora; probe that WordNet loads.
+        lemma = lemmatizer.lemmatize("dogs", "n")
+    except LookupError:
+        # Missing / unloadable WordNet (or related NLTK data) corpora.
+        return None
+    if lemma != "dog":
+        return None
+    return lemmatizer
+
+
 def resolve_lemmatizer_backend() -> str:
     """Return the active English lemmatizer backend name (cached).
 
-    Primary: ``nltk.WordNetLemmatizer`` (POS-aware). Fallback: ``simplemma``
-    only when NLTK/WordNet is unavailable. Last resort: ``identity``.
+    Primary: ``nltk.WordNetLemmatizer`` (POS-aware) only when WordNet actually
+    loads. Fallback: ``simplemma`` when NLTK/WordNet is unavailable. Last
+    resort: ``identity``.
     """
     global _LEMMATIZER_BACKEND, _WORDNET_LEMMATIZER
     if _LEMMATIZER_BACKEND is not None:
         return _LEMMATIZER_BACKEND
 
-    if NLTK_AVAILABLE and WordNetLemmatizer is not None:
-        _WORDNET_LEMMATIZER = WordNetLemmatizer()
+    lemmatizer = _probe_wordnet_lemmatizer()
+    if lemmatizer is not None:
+        _WORDNET_LEMMATIZER = lemmatizer
         try:
             import nltk as _nltk
 
@@ -214,23 +240,12 @@ class TextEvaluator:
 
     def __init__(self, tokenizer: Optional[Callable[[str], list]] = None):
         self.tokenizer = tokenizer
-        self._pos_cache: Dict[str, Set[str]] = {}
         self._token_cache: Dict[Tuple[str, bool], List[str]] = {}
 
     def extract_content_words(self, text: str) -> Set[str]:
         """Extract unique content-word surface forms (KVL v1 / A1-ratio path)."""
-        if not NLTK_AVAILABLE:
-            return set(self._extract_content_word_tokens_fallback(text))
-
-        try:
-            if text in self._pos_cache:
-                return self._pos_cache[text]
-
-            content_words = set(self.extract_content_word_tokens(text, lemmatize=False))
-            self._pos_cache[text] = content_words
-            return content_words
-        except Exception:
-            return set(self._extract_content_word_tokens_fallback(text))
+        # Single cache via extract_content_word_tokens — do not fill a second set cache.
+        return set(self.extract_content_word_tokens(text, lemmatize=False))
 
     def extract_content_word_tokens(
         self, text: str, *, lemmatize: bool = False

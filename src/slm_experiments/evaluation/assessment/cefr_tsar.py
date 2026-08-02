@@ -12,7 +12,10 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import pandas as pd
 
-from slm_experiments.evaluation.assessment.scorers import register_scorer
+from slm_experiments.evaluation.assessment.scorers import (
+    ensure_scorer_registered,
+    register_scorer,
+)
 
 
 TSAR_SCORER_NAME = "cefr_tsar"
@@ -249,7 +252,7 @@ def predict_member_labels(
                     model=spec["model_id"],
                     revision=spec["revision"],
                     device=pipe_device,
-                    torch_dtype="auto",
+                    dtype="auto",
                     model_kwargs={"attn_implementation": attn},
                 ),
             )
@@ -292,6 +295,24 @@ def _row_from_members(
 ) -> Dict[str, Any]:
     ensemble = aggregate_confidence_max(members)
     sp_level = normalize_label(cefr_sp_level)
+    # Winning label must normalize to A1..C2; never report ok + null label.
+    if ensemble["label"] is None:
+        row = empty_tsar_row(
+            item_id,
+            status=STATUS_ERROR,
+            error="unnormalizable ensemble member label",
+            cefr_sp_level=sp_level,
+        )
+        by_key = {m["key"]: m for m in members}
+        for key in _MEMBER_KEYS:
+            pred = by_key.get(key, {})
+            row[f"cefr_tsar_{key}_label"] = normalize_label(pred.get("label"))
+            score = pred.get("score")
+            row[f"cefr_tsar_{key}_confidence"] = (
+                float(score) if score is not None else None
+            )
+        return row
+
     row = empty_tsar_row(item_id, status=STATUS_OK, cefr_sp_level=sp_level)
     by_key = {m["key"]: m for m in members}
     for key in _MEMBER_KEYS:
@@ -311,10 +332,21 @@ def _row_from_members(
 
 
 @register_scorer(TSAR_SCORER_NAME)
-def score_cefr_tsar(items: pd.DataFrame) -> pd.DataFrame:
+def score_cefr_tsar(
+    items: pd.DataFrame,
+    *,
+    device: Optional[str] = None,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+) -> pd.DataFrame:
     """Score successful non-empty cleaned_response texts with the TSAR ensemble.
 
     Never mutates generation runs; never sets meets_a1_criteria.
+
+    Defensive: when ``generation_successful`` is present, failed or empty
+    rows are marked ``missing`` rather than trusting upstream filtering.
+
+    ``device`` defaults to auto-detect (via ``predict_member_labels``);
+    ``batch_size`` defaults to ``DEFAULT_BATCH_SIZE`` (8).
     """
     if items.empty or "item_id" not in items.columns:
         return pd.DataFrame(columns=list(SCORE_COLUMNS))
@@ -330,6 +362,8 @@ def score_cefr_tsar(items: pd.DataFrame) -> pd.DataFrame:
 
     rows: List[Dict[str, Any]] = []
     scorable_mask = working["cleaned_response"] != ""
+    if "generation_successful" in working.columns:
+        scorable_mask = scorable_mask & _bool_series(working["generation_successful"])
     missing = working.loc[~scorable_mask]
     for _, item in missing.iterrows():
         rows.append(
@@ -346,7 +380,11 @@ def score_cefr_tsar(items: pd.DataFrame) -> pd.DataFrame:
         item_ids = scorable["item_id"].astype(str).tolist()
         sp_levels = scorable["cefr_sp_level"].tolist()
         try:
-            member_rows = predict_member_labels(texts)
+            member_rows = predict_member_labels(
+                texts,
+                device=device,
+                batch_size=batch_size,
+            )
             for item_id, members, sp in zip(item_ids, member_rows, sp_levels):
                 rows.append(_row_from_members(item_id, members, sp))
         except Exception as exc:  # noqa: BLE001 — surface as per-row error state
@@ -371,11 +409,7 @@ def score_cefr_tsar(items: pd.DataFrame) -> pd.DataFrame:
 
 def ensure_registered() -> None:
     """Re-register after ``clear_scorers`` (tests) or ensure import side-effect."""
-    from slm_experiments.evaluation.assessment import scorers as scorers_mod
-
-    if TSAR_SCORER_NAME not in scorers_mod.list_scorers():
-        # Bypass decorator duplicate-name guard after clear_scorers().
-        scorers_mod._REGISTRY[TSAR_SCORER_NAME] = score_cefr_tsar  # noqa: SLF001
+    ensure_scorer_registered(TSAR_SCORER_NAME, score_cefr_tsar)
 
 
 def tsar_scorer_revision() -> Dict[str, Any]:
@@ -491,6 +525,8 @@ def compute_tsar_assessment_summary(
             by_model[str(model_name)] = _tsar_metric_block(group, scores_df)
         summary["by_model"] = by_model
 
+    sweep_dimensions: List[str] = []
+    sweep_values: Dict[str, List[str]] = {}
     for col in _SWEEP_COLUMNS:
         if col not in item_map_df.columns:
             continue
@@ -505,8 +541,11 @@ def compute_tsar_assessment_summary(
                 item_map_df.loc[mask], scores_df
             )
         summary[section] = grouped
-        summary["metadata"]["sweep_dimension"] = col
-        summary["metadata"]["sweep_values"] = list(grouped.keys())
+        sweep_dimensions.append(col)
+        sweep_values[col] = list(grouped.keys())
+    # List (not overwritten string) so mixed-family bundles keep all axes.
+    summary["metadata"]["sweep_dimension"] = sweep_dimensions
+    summary["metadata"]["sweep_values"] = sweep_values
 
     return summary
 

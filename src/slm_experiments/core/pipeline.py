@@ -149,6 +149,7 @@ class ExperimentPipeline:
         raw_response = response_data.get("response") or ""
         response_time = float(response_data.get("response_time_seconds", 0.0))
         model_success = bool(response_data.get("generation_successful", False))
+        hit_max = bool(response_data.get("hit_max_tokens", False))
 
         cleaned = self.formatter.clean_response_for_evaluation(raw_response)
         is_successful = model_success and bool(cleaned.strip())
@@ -166,6 +167,7 @@ class ExperimentPipeline:
                 experiment_name=name,
                 cleaned_response=cleaned,
                 generation_successful=True,
+                hit_max_tokens=hit_max,
                 meets_a1_criteria=meets_a1,
                 kvl_metrics=self._compute_kvl_metrics(cleaned, config.kvl_l1),
                 cefr_sp_metrics=cefr_sp_metrics,
@@ -181,6 +183,7 @@ class ExperimentPipeline:
             experiment_name=name,
             cleaned_response=cleaned,
             generation_successful=False,
+            hit_max_tokens=hit_max,
             meets_a1_criteria=False,
             kvl_metrics=empty_kvl_metrics(config.kvl_l1),
             cefr_sp_metrics=self._empty_cefr_sp_metrics(config),
@@ -207,6 +210,7 @@ class ExperimentPipeline:
         raw_response = response_data.get("response") or ""
         response_time = float(response_data.get("response_time_seconds", 0.0))
         model_success = bool(response_data.get("generation_successful", False))
+        hit_max = bool(response_data.get("hit_max_tokens", False))
 
         cleaned = self.formatter.clean_response_for_evaluation(raw_response)
         is_successful = model_success and bool(cleaned.strip())
@@ -224,6 +228,7 @@ class ExperimentPipeline:
                 response_data.get("beam_cumulative_logprob", 0.0)
             ),
             "beam_width": int(response_data.get("beam_width", beam_width)),
+            "hit_max_tokens": hit_max,
         }
 
         if is_successful:
@@ -275,6 +280,7 @@ class ExperimentPipeline:
         raw_response = response_data.get("response") or ""
         response_time = float(response_data.get("response_time_seconds", 0.0))
         model_success = bool(response_data.get("generation_successful", False))
+        hit_max = bool(response_data.get("hit_max_tokens", False))
 
         cleaned = self.formatter.clean_response_for_evaluation(raw_response)
         is_successful = model_success and bool(cleaned.strip())
@@ -289,6 +295,7 @@ class ExperimentPipeline:
             "guided_intervention_rate": float(
                 response_data.get("guided_intervention_rate", 0.0)
             ),
+            "hit_max_tokens": hit_max,
         }
 
         if is_successful:
@@ -347,6 +354,7 @@ class ExperimentPipeline:
         raw_response = response_data.get("response") or ""
         response_time = float(response_data.get("response_time_seconds", 0.0))
         model_success = bool(response_data.get("generation_successful", False))
+        hit_max = bool(response_data.get("hit_max_tokens", False))
 
         cleaned = self.formatter.clean_response_for_evaluation(raw_response)
         is_successful = model_success and bool(cleaned.strip())
@@ -365,6 +373,7 @@ class ExperimentPipeline:
             "kvl_beam_candidates_pruned": int(
                 response_data.get("kvl_beam_candidates_pruned", 0)
             ),
+            "hit_max_tokens": hit_max,
         }
 
         if is_successful:
