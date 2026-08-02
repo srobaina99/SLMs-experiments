@@ -256,7 +256,12 @@ class AssessmentBundler:
             json.dumps(manifest, indent=2), encoding="utf-8"
         )
 
-        # Paired-delta analysis (#19/#20) wired when analysis module lands.
+        # Paired-delta analysis (issue #19); re-runnable via `assess analyze`.
+        from slm_experiments.evaluation.assessment.analysis import (
+            analyze_assessment_bundle,
+        )
+
+        analyze_assessment_bundle(run_id, results_root=self.run_store.results_root)
         return run_id, out_dir
 
     @staticmethod
