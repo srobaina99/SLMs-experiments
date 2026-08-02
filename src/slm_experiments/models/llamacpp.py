@@ -171,6 +171,7 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
                 "response_time_seconds": 0.0,
                 "generation_successful": False,
                 "error_message": f"{self.model_name} model not loaded",
+                "hit_max_tokens": False,
             }
 
         start_time = time.time()
@@ -200,9 +201,11 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
             )
 
             elapsed = time.time() - start_time
-            raw_response = output["choices"][0]["text"]
+            choice = output["choices"][0]
+            raw_response = choice["text"]
             response = self._extract_response(raw_response)
             response = self.response_formatter.clean_response_for_evaluation(response)
+            hit_max_tokens = choice.get("finish_reason") == "length"
 
             if not response.strip():
                 return {
@@ -210,6 +213,7 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
                     "response_time_seconds": elapsed,
                     "generation_successful": False,
                     "error_message": "Empty generation",
+                    "hit_max_tokens": hit_max_tokens,
                 }
 
             return {
@@ -217,6 +221,7 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
                 "response_time_seconds": elapsed,
                 "generation_successful": True,
                 "error_message": "",
+                "hit_max_tokens": hit_max_tokens,
             }
         except Exception as exc:
             return {
@@ -224,6 +229,7 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
                 "response_time_seconds": time.time() - start_time,
                 "generation_successful": False,
                 "error_message": str(exc),
+                "hit_max_tokens": False,
             }
 
     def get_model_info(self) -> Dict[str, Any]:
@@ -465,6 +471,7 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
             ),
             "generation_successful": successful,
             "error_message": result.get("error_message", ""),
+            "hit_max_tokens": bool(result.get("hit_max_tokens", False)),
             "guided_top_k": result.get("guided_top_k", config.guided_top_k),
             "guided_mode": result.get("guided_mode", config.guided_mode),
             "guided_steps_a1_chosen": result.get("guided_steps_a1_chosen", 0),
@@ -489,6 +496,7 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
             "response_time_seconds": elapsed,
             "generation_successful": False,
             "error_message": error_message,
+            "hit_max_tokens": False,
             "guided_top_k": config.guided_top_k,
             "guided_mode": config.guided_mode,
             "guided_steps_a1_chosen": 0,
@@ -509,6 +517,7 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
                 "response_time_seconds": 0.0,
                 "generation_successful": False,
                 "error_message": f"{self.model_name} model not loaded",
+                "hit_max_tokens": False,
                 "guided_top_k": config.guided_top_k,
                 "guided_mode": config.guided_mode,
                 "guided_steps_a1_chosen": 0,
@@ -562,6 +571,7 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
                     "response_time_seconds": time.time() - start_time,
                     "generation_successful": False,
                     "error_message": "Empty generation",
+                    "hit_max_tokens": decode_result.hit_max_tokens,
                     "guided_top_k": config.guided_top_k,
                     "guided_mode": config.guided_mode,
                     "guided_steps_a1_chosen": decode_result.steps_a1_chosen,
@@ -576,6 +586,7 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
                 "response_time_seconds": time.time() - start_time,
                 "generation_successful": True,
                 "error_message": "",
+                "hit_max_tokens": decode_result.hit_max_tokens,
                 "guided_top_k": config.guided_top_k,
                 "guided_mode": config.guided_mode,
                 "guided_steps_a1_chosen": decode_result.steps_a1_chosen,
@@ -590,6 +601,7 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
                 "response_time_seconds": time.time() - start_time,
                 "generation_successful": False,
                 "error_message": str(exc),
+                "hit_max_tokens": False,
                 "guided_top_k": config.guided_top_k,
                 "guided_mode": config.guided_mode,
                 "guided_steps_a1_chosen": 0,
@@ -669,6 +681,7 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
             ),
             "generation_successful": successful,
             "error_message": result.get("error_message", ""),
+            "hit_max_tokens": bool(result.get("hit_max_tokens", False)),
             "kvl_beam_width": beam_width,
             "kvl_branch_factor": branch_factor,
             "kvl_beam_steps_total": result.get("kvl_beam_steps_total", 0),
@@ -690,6 +703,7 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
             "response_time_seconds": elapsed,
             "generation_successful": False,
             "error_message": error_message,
+            "hit_max_tokens": False,
             "kvl_beam_width": beam_width,
             "kvl_branch_factor": branch_factor,
             "kvl_beam_steps_total": 0,
@@ -712,6 +726,7 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
                 "response_time_seconds": 0.0,
                 "generation_successful": False,
                 "error_message": f"{self.model_name} model not loaded",
+                "hit_max_tokens": False,
                 "kvl_beam_steps_total": 0,
                 "kvl_beam_words_scored": 0,
                 "kvl_beam_running_mean": None,
@@ -763,6 +778,7 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
                     "response_time_seconds": elapsed,
                     "generation_successful": False,
                     "error_message": "Empty generation",
+                    "hit_max_tokens": decode_result.hit_max_tokens,
                     "kvl_beam_steps_total": decode_result.steps_total,
                     "kvl_beam_words_scored": decode_result.words_scored,
                     "kvl_beam_running_mean": decode_result.running_mean,
@@ -775,6 +791,7 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
                 "response_time_seconds": elapsed,
                 "generation_successful": True,
                 "error_message": "",
+                "hit_max_tokens": decode_result.hit_max_tokens,
                 "kvl_beam_steps_total": decode_result.steps_total,
                 "kvl_beam_words_scored": decode_result.words_scored,
                 "kvl_beam_running_mean": decode_result.running_mean,
@@ -789,6 +806,7 @@ class LlamaCppBaseWrapper(BaseModelWrapper):
                 "response_time_seconds": time.time() - start_time,
                 "generation_successful": False,
                 "error_message": str(exc),
+                "hit_max_tokens": False,
                 "kvl_beam_steps_total": 0,
                 "kvl_beam_words_scored": 0,
                 "kvl_beam_running_mean": None,

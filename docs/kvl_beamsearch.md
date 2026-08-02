@@ -29,7 +29,7 @@ See also: [interventions.md](interventions.md), [metrics.md](metrics.md) (KVL ev
 | **Guided decoding** | Every step, greedy-ish | Single path; pick easy token if in top-K pool |
 | **KVL beam search** (this intervention) | During generation | Multiple paths; prune by running KVL aggregate; **first-finish return** |
 
-**Research question:** If we steer decoding toward vocabulary that Spanish L1 learners are likely to know (per `kvl_lookup_es.json`), does that improve the readability proxy (`meets_a1_criteria`) and/or post-hoc KVL metrics more than post-hoc reranking or step-wise A1 filtering?
+**Research question:** If we steer decoding toward vocabulary that Spanish L1 learners are likely to know (per `kvl_lookup_es.json`), does that improve the CEFR-SP A1 gate (`meets_a1_criteria`) and/or post-hoc KVL metrics more than post-hoc reranking or step-wise A1 filtering?
 
 KVL beam sits between best-of-N and guided decoding: it explores several futures at once, but ranks them by **external learner knowledge** rather than model probability or the internal A1 starter list.
 
@@ -52,7 +52,7 @@ CLI: phase2 kvl_beam
 ### One observation
 
 1. `KvlBeamSweepRunner` loads each model once per model batch.
-2. For each `(config, prompt)`: format prompt → run KVL beam decode → extract/clean response → evaluate readability + KVL metrics → record `meets_a1_criteria` (proxy).
+2. For each `(config, prompt)`: format prompt → run KVL beam decode → extract/clean response → evaluate CEFR-SP / readability / KVL metrics → record `meets_a1_criteria` (CEFR-SP document-level A1).
 3. Beam metadata (width, branch factor, running KVL stats, model logprob tie-break) lands in `full.csv`.
 
 ### CLI examples
@@ -328,7 +328,7 @@ Share infrastructure with `ConstrainedDecoder` where possible (stop tokens, prom
 
 | | |
 |-|-|
-| **Symptom** | Beam optimizes KVL mean; success judged by FK/Fog/Spache |
+| **Symptom** | Beam optimizes KVL mean; primary gate is CEFR-SP A1 (FK/Fog/Spache descriptive only) |
 | **Solution** | Treat KVL beam as **hypothesis**, not ground truth. Report both `kvl_mean_score` and `meets_a1_criteria`. Compare to best-of-N KVL rerank baseline. |
 | **Analysis** | Selected vs runner-up beam readability; width=1 degenerates to greedy KVL-aware decode |
 | **Owner** | experiment design |

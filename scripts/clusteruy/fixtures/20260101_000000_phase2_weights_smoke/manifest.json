@@ -1,0 +1,24 @@
+{
+  "kind": "generation",
+  "run_id": "20260101_000000_phase2_weights_smoke",
+  "phase": 2,
+  "experiment": "weights",
+  "started_at": "2026-01-01T00:00:00+00:00",
+  "completed_at": "2026-01-01T00:00:00+00:00",
+  "cli_args": [
+    "--prompts",
+    "2",
+    "--no-plot"
+  ],
+  "models": [
+    "Phi3",
+    "Qwen3"
+  ],
+  "prompt_count": 2,
+  "observations": {
+    "total": 2,
+    "successful": 2,
+    "failed": 0,
+    "hit_max_tokens": 0
+  }
+}

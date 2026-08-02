@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Optional, Union
 
 import pandas as pd
 
+from slm_experiments.core.bool_series import coerce_bool_series
+from slm_experiments.core.config_label import config_label
 from slm_experiments.core.result import ExperimentResult
 
 SPEC_COLUMNS = [
@@ -17,6 +19,7 @@ SPEC_COLUMNS = [
     "answer",
     "time_spent",
     "generation_successful",
+    "hit_max_tokens",
     "meets_a1_criteria",
     "flesch_kincaid_grade",
     "gunning_fog",
@@ -52,6 +55,9 @@ SWEEP_SUMMARY_SECTIONS = {
     "guided": ("by_guided_top_k", "guided_top_k"),
 }
 
+KIND_GENERATION = "generation"
+KIND_ASSESSMENT = "assessment"
+
 
 def _format_sweep_key(column: str, value: Any) -> str:
     if column in ("beam_width", "kvl_beam_width", "num_shots", "guided_top_k"):
@@ -67,7 +73,8 @@ def _sweep_sort_key(column: str, value: Any) -> float:
 
 def _aggregate_metric_stats(df: pd.DataFrame) -> Dict[str, Any]:
     """Build count + metric stats for one group, excluding failed generations."""
-    successful = df[df["generation_successful"] == True]  # noqa: E712
+    success_flags = coerce_bool_series(df["generation_successful"])
+    successful = df.loc[success_flags]
     stats: Dict[str, Any] = {
         "count": int(len(df)),
         "generation_successful_count": int(len(successful)),
@@ -77,13 +84,23 @@ def _aggregate_metric_stats(df: pd.DataFrame) -> Dict[str, Any]:
     else:
         stats["generation_failure_rate"] = 0.0
 
+    if "hit_max_tokens" in df.columns:
+        maxed = int(coerce_bool_series(df["hit_max_tokens"]).sum())
+        stats["hit_max_tokens_count"] = maxed
+        stats["hit_max_tokens_rate"] = float(maxed / len(df)) if len(df) else 0.0
+    else:
+        stats["hit_max_tokens_count"] = 0
+        stats["hit_max_tokens_rate"] = 0.0
+
     if "meets_a1_criteria" in df.columns:
-        a1_pass = int(df["meets_a1_criteria"].sum())
+        a1_flags = coerce_bool_series(df["meets_a1_criteria"])
+        a1_pass = int(a1_flags.sum())
         stats["a1_pass_count"] = a1_pass
         stats["a1_pass_rate"] = float(a1_pass / len(df)) if len(df) else 0.0
         if not successful.empty:
             stats["a1_pass_rate_given_valid"] = float(
-                successful["meets_a1_criteria"].sum() / len(successful)
+                coerce_bool_series(successful["meets_a1_criteria"]).sum()
+                / len(successful)
             )
 
     for col in NUMERIC_SUMMARY_COLUMNS:
@@ -196,13 +213,7 @@ def make_run_id(
 
 
 def _config_label(row: pd.Series) -> str:
-    if row["config_weighting"] and row["config_prompting"]:
-        return "both"
-    if row["config_weighting"]:
-        return "weighting_only"
-    if row["config_prompting"]:
-        return "prompting_only"
-    return "control"
+    return config_label(bool(row["config_weighting"]), bool(row["config_prompting"]))
 
 
 def _metric_stats(series: pd.Series) -> Optional[Dict[str, float]]:
@@ -227,7 +238,8 @@ def compute_summary_stats(
         return {}
 
     df = pd.DataFrame([r.to_dict() for r in results])
-    successful_df = df[df["generation_successful"] == True]  # noqa: E712
+    success_flags = coerce_bool_series(df["generation_successful"])
+    successful_df = df.loc[success_flags]
 
     summary: Dict[str, Any] = {"overall": {}, "by_config": {}, "metadata": {}}
 
@@ -250,16 +262,28 @@ def compute_summary_stats(
         "total_experiments": len(results),
         "successful_experiments": int(successful_df.shape[0]),
         "failed_experiments": int(len(results) - successful_df.shape[0]),
+        "generation_failure_rate": float(
+            1 - successful_df.shape[0] / len(results)
+        )
+        if results
+        else 0.0,
         "unique_prompts": int(df["prompt"].nunique()),
         "configs_tested": int(df["config_name"].nunique()),
     }
+    if "hit_max_tokens" in df.columns:
+        maxed = int(coerce_bool_series(df["hit_max_tokens"]).sum())
+        summary["metadata"]["hit_max_tokens_count"] = maxed
+        summary["metadata"]["hit_max_tokens_rate"] = (
+            float(maxed / len(df)) if len(df) else 0.0
+        )
     if "model" in df.columns:
         summary["metadata"]["models_tested"] = df["model"].unique().tolist()
 
     if "meets_a1_criteria" in df.columns:
-        summary["metadata"]["a1_pass_experiments"] = int(df["meets_a1_criteria"].sum())
+        a1_flags = coerce_bool_series(df["meets_a1_criteria"])
+        summary["metadata"]["a1_pass_experiments"] = int(a1_flags.sum())
         summary["metadata"]["a1_pass_rate"] = float(
-            df["meets_a1_criteria"].sum() / len(df)
+            a1_flags.sum() / len(df)
         ) if len(df) else 0.0
 
     return summary
@@ -296,8 +320,10 @@ class RunStore:
 
         successful = sum(1 for r in results if r.generation_successful)
         failed = len(results) - successful
+        maxed = sum(1 for r in results if r.hit_max_tokens)
 
         manifest = {
+            "kind": KIND_GENERATION,
             "run_id": run_id,
             "phase": phase,
             "experiment": experiment,
@@ -310,6 +336,7 @@ class RunStore:
                 "total": len(results),
                 "successful": successful,
                 "failed": failed,
+                "hit_max_tokens": maxed,
             },
             "artifacts": {
                 "specification_csv": "specification.csv",
@@ -352,7 +379,11 @@ class RunStore:
         pd.DataFrame([r.to_dict() for r in results]).to_csv(path, index=False)
 
     def list_runs(self) -> List[Dict[str, Any]]:
-        """Return manifests for all run bundles, newest first."""
+        """Return manifests for all run bundles, newest first.
+
+        Bundles without an explicit ``kind`` are treated as generation runs
+        (legacy manifests written before the assessment discriminator).
+        """
         runs_dir = self.results_root / "runs"
         if not runs_dir.exists():
             return []
@@ -363,25 +394,55 @@ class RunStore:
                 continue
             manifest_path = run_path / "manifest.json"
             if manifest_path.exists():
-                manifests.append(json.loads(manifest_path.read_text(encoding="utf-8")))
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                manifest.setdefault("kind", KIND_GENERATION)
+                manifests.append(manifest)
 
         manifests.sort(key=lambda m: m.get("started_at", ""), reverse=True)
         return manifests
 
+    def bundle_kind(self, run_id: str) -> str:
+        """Return the bundle kind (``generation`` or ``assessment``)."""
+        return self.read_manifest(run_id).get("kind", KIND_GENERATION)
+
+    def is_assessment(self, run_id: str) -> bool:
+        return self.bundle_kind(run_id) == KIND_ASSESSMENT
+
     def read_manifest(self, run_id: str) -> Dict[str, Any]:
         manifest_path = self.run_dir(run_id) / "manifest.json"
-        return json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest.setdefault("kind", KIND_GENERATION)
+        return manifest
 
     def read_summary(self, run_id: str) -> Dict[str, Any]:
         summary_path = self.run_dir(run_id) / "summary.json"
         return json.loads(summary_path.read_text(encoding="utf-8"))
+
+    def read_items_csv(self, run_id: str) -> pd.DataFrame:
+        """Load items.csv from an assessment bundle."""
+        path = self.run_dir(run_id) / "items.csv"
+        if not path.exists():
+            raise FileNotFoundError(f"items.csv not found for run: {run_id}")
+        return pd.read_csv(path)
+
+    def read_item_map_csv(self, run_id: str) -> pd.DataFrame:
+        """Load item_map.csv from an assessment bundle."""
+        path = self.run_dir(run_id) / "item_map.csv"
+        if not path.exists():
+            raise FileNotFoundError(f"item_map.csv not found for run: {run_id}")
+        return pd.read_csv(path)
 
     def read_full_csv(self, run_id: str) -> pd.DataFrame:
         """Load full.csv from a run bundle."""
         full_path = self.run_dir(run_id) / "full.csv"
         if not full_path.exists():
             raise FileNotFoundError(f"full.csv not found for run: {run_id}")
-        return pd.read_csv(full_path)
+        try:
+            return pd.read_csv(full_path)
+        except pd.errors.EmptyDataError as exc:
+            raise ValueError(
+                f"full.csv is empty (no header/columns) for run: {run_id}"
+            ) from exc
 
     def write_full_csv(self, run_id: str, df: pd.DataFrame) -> Path:
         """Overwrite full.csv in a run bundle."""

@@ -18,6 +18,7 @@ class ConstrainedDecodeResult:
     steps_a1_chosen: int
     steps_fallback_argmax: int
     steps_no_a1_in_pool: int
+    hit_max_tokens: bool = False
 
 
 def _apply_top_k(logits: np.ndarray, top_k: int) -> np.ndarray:
@@ -133,6 +134,7 @@ class ConstrainedDecoder:
         steps_no_a1_in_pool = 0
         partial_remaining: Optional[Tuple[int, ...]] = None
 
+        hit_max_tokens = False
         for step_index in range(max_tokens):
             logits = _get_next_logits(llm, step_index)
             generated_text = _decode_generated(llm, prompt_token_ids, generated)
@@ -200,6 +202,9 @@ class ConstrainedDecoder:
             generated_text = _decode_generated(llm, prompt_token_ids, generated)
             if _hits_stop(generated_text, stop):
                 break
+        else:
+            # Loop exhausted without EOS/stop — output used the full token budget.
+            hit_max_tokens = max_tokens > 0
 
         text = _decode_generated(llm, prompt_token_ids, generated)
         for stop_seq in stop:
@@ -214,4 +219,5 @@ class ConstrainedDecoder:
             steps_a1_chosen=steps_a1_chosen,
             steps_fallback_argmax=steps_fallback_argmax,
             steps_no_a1_in_pool=steps_no_a1_in_pool,
+            hit_max_tokens=hit_max_tokens,
         )

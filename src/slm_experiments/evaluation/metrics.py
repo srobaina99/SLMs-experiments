@@ -1,29 +1,238 @@
 """Text readability and complexity evaluation."""
 
-from typing import Any, Callable, Dict, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import textstat
 
 try:
     import nltk
     from nltk import pos_tag, word_tokenize
+    from nltk.stem import WordNetLemmatizer
 
     NLTK_AVAILABLE = True
 except ImportError:
     NLTK_AVAILABLE = False
+    WordNetLemmatizer = None  # type: ignore[misc, assignment]
+
+CONTENT_POS_TAGS = frozenset(
+    {
+        "NN",
+        "NNS",
+        "NNP",
+        "NNPS",
+        "VB",
+        "VBD",
+        "VBG",
+        "VBN",
+        "VBP",
+        "VBZ",
+        "JJ",
+        "JJR",
+        "JJS",
+        "RB",
+        "RBR",
+        "RBS",
+    }
+)
+
+_FUNCTION_WORDS_FALLBACK = frozenset(
+    {
+        "the",
+        "a",
+        "an",
+        "and",
+        "or",
+        "but",
+        "in",
+        "on",
+        "at",
+        "to",
+        "for",
+        "of",
+        "with",
+        "by",
+        "from",
+        "as",
+        "is",
+        "are",
+        "am",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        "will",
+        "would",
+        "should",
+        "could",
+        "may",
+        "might",
+        "can",
+        "must",
+        "shall",
+        "it",
+        "its",
+        "this",
+        "that",
+        "these",
+        "those",
+        "i",
+        "you",
+        "he",
+        "she",
+        "we",
+        "they",
+        "me",
+        "him",
+        "her",
+        "us",
+        "them",
+        "my",
+        "your",
+        "his",
+        "our",
+        "their",
+        "if",
+        "then",
+        "so",
+        "what",
+        "when",
+        "where",
+        "why",
+        "how",
+        "all",
+        "each",
+        "every",
+        "no",
+        "not",
+        "only",
+        "just",
+        "very",
+    }
+)
 
 if NLTK_AVAILABLE:
-    for resource in ("punkt", "averaged_perceptron_tagger", "wordnet"):
+    # NLTK 3.8+: averaged_perceptron_tagger_eng; older: averaged_perceptron_tagger.
+    # English WordNet lemmatization does not need omw-1.4 (skip; avoids offline
+    # download attempts that fail and are unused for EN lemmas).
+    for resource, kind in (
+        ("punkt", "tokenizers"),
+        ("averaged_perceptron_tagger_eng", "taggers"),
+        ("averaged_perceptron_tagger", "taggers"),
+        ("wordnet", "corpora"),
+    ):
         try:
-            nltk.data.find(
-                f"tokenizers/{resource}"
-                if resource == "punkt"
-                else f"taggers/{resource}"
-                if resource == "averaged_perceptron_tagger"
-                else f"corpora/{resource}"
-            )
+            nltk.data.find(f"{kind}/{resource}")
         except LookupError:
             nltk.download(resource, quiet=True)
+
+
+def _treebank_to_wordnet_pos(tag: str) -> str:
+    """Map Penn Treebank POS → WordNet POS (n/v/a/r)."""
+    if tag.startswith("J"):
+        return "a"
+    if tag.startswith("V"):
+        return "v"
+    if tag.startswith("R"):
+        return "r"
+    return "n"
+
+
+def _clean_alnum(token: str) -> str:
+    return "".join(c for c in token if c.isalnum())
+
+
+# Resolved once: primary is POS-aware WordNet (nltk core dep).
+_LEMMATIZER_BACKEND: Optional[str] = None
+_WORDNET_LEMMATIZER: Any = None
+
+
+def reset_lemmatizer_backend_cache() -> None:
+    """Clear cached lemmatizer selection (tests / forced re-probe)."""
+    global _LEMMATIZER_BACKEND, _WORDNET_LEMMATIZER
+    _LEMMATIZER_BACKEND = None
+    _WORDNET_LEMMATIZER = None
+
+
+def _probe_wordnet_lemmatizer() -> Any:
+    """Return a working WordNetLemmatizer, or None if WordNet data is unusable."""
+    if not NLTK_AVAILABLE or WordNetLemmatizer is None:
+        return None
+    try:
+        lemmatizer = WordNetLemmatizer()
+        # Instantiating succeeds without corpora; probe that WordNet loads.
+        lemma = lemmatizer.lemmatize("dogs", "n")
+    except LookupError:
+        # Missing / unloadable WordNet (or related NLTK data) corpora.
+        return None
+    if lemma != "dog":
+        return None
+    return lemmatizer
+
+
+def resolve_lemmatizer_backend() -> str:
+    """Return the active English lemmatizer backend name (cached).
+
+    Primary: ``nltk.WordNetLemmatizer`` (POS-aware) only when WordNet actually
+    loads. Fallback: ``simplemma`` when NLTK/WordNet is unavailable. Last
+    resort: ``identity``.
+    """
+    global _LEMMATIZER_BACKEND, _WORDNET_LEMMATIZER
+    if _LEMMATIZER_BACKEND is not None:
+        return _LEMMATIZER_BACKEND
+
+    lemmatizer = _probe_wordnet_lemmatizer()
+    if lemmatizer is not None:
+        _WORDNET_LEMMATIZER = lemmatizer
+        try:
+            import nltk as _nltk
+
+            version = getattr(_nltk, "__version__", "unknown")
+        except Exception:
+            version = "unknown"
+        _LEMMATIZER_BACKEND = f"nltk.WordNetLemmatizer/{version}"
+        return _LEMMATIZER_BACKEND
+
+    try:
+        import simplemma
+
+        version = getattr(simplemma, "__version__", "unknown")
+        _LEMMATIZER_BACKEND = f"simplemma/{version}"
+        return _LEMMATIZER_BACKEND
+    except ImportError:
+        pass
+
+    _LEMMATIZER_BACKEND = "identity"
+    return _LEMMATIZER_BACKEND
+
+
+def lemmatize_english_token(token: str, pos_tag: Optional[str] = None) -> str:
+    """Lemmatize an English token for KVL v2 lookup.
+
+    Primary path is POS-aware NLTK ``WordNetLemmatizer`` (uses ``pos_tag``).
+    ``simplemma`` is only a fallback when NLTK/WordNet is unavailable.
+    """
+    surface = token.lower()
+    if not surface:
+        return surface
+
+    backend = resolve_lemmatizer_backend()
+    if backend.startswith("nltk.WordNetLemmatizer") and _WORDNET_LEMMATIZER is not None:
+        wn_pos = _treebank_to_wordnet_pos(pos_tag or "NN")
+        return _WORDNET_LEMMATIZER.lemmatize(surface, wn_pos)
+
+    if backend.startswith("simplemma"):
+        import simplemma
+
+        return simplemma.lemmatize(surface, lang="en").lower()
+
+    return surface
 
 
 class TextEvaluator:
@@ -31,55 +240,73 @@ class TextEvaluator:
 
     def __init__(self, tokenizer: Optional[Callable[[str], list]] = None):
         self.tokenizer = tokenizer
-        self._pos_cache: Dict[str, Set[str]] = {}
+        self._token_cache: Dict[Tuple[str, bool], List[str]] = {}
 
     def extract_content_words(self, text: str) -> Set[str]:
-        """Extract content words (nouns, verbs, adjectives, adverbs) from text."""
+        """Extract unique content-word surface forms (KVL v1 / A1-ratio path)."""
+        # Single cache via extract_content_word_tokens — do not fill a second set cache.
+        return set(self.extract_content_word_tokens(text, lemmatize=False))
+
+    def extract_content_word_tokens(
+        self, text: str, *, lemmatize: bool = False
+    ) -> List[str]:
+        """Extract content-word tokens in occurrence order (KVL v2 path).
+
+        Unlike ``extract_content_words`` (unique surface-form set), this returns
+        every content-word occurrence. When ``lemmatize=True``, each token is
+        POS-filtered then lemmatized for lookup (see ``lemmatize_english_token``).
+        """
+        cache_key = (text, lemmatize)
+        if cache_key in self._token_cache:
+            return list(self._token_cache[cache_key])
+
         if not NLTK_AVAILABLE:
-            return self._extract_content_words_fallback(text)
+            tokens = self._extract_content_word_tokens_fallback(text, lemmatize=lemmatize)
+            self._token_cache[cache_key] = tokens
+            return list(tokens)
 
         try:
-            if text in self._pos_cache:
-                return self._pos_cache[text]
-
-            tokens = word_tokenize(text.lower())
-            pos_tags = pos_tag(tokens)
-            content_pos = {
-                "NN", "NNS", "NNP", "NNPS",
-                "VB", "VBD", "VBG", "VBN", "VBP", "VBZ",
-                "JJ", "JJR", "JJS",
-                "RB", "RBR", "RBS",
-            }
-
-            content_words = set()
+            raw = word_tokenize(text.lower())
+            pos_tags = pos_tag(raw)
+            tokens: List[str] = []
             for token, pos in pos_tags:
-                if pos in content_pos:
-                    clean_token = "".join(c for c in token if c.isalnum())
-                    if clean_token:
-                        content_words.add(clean_token)
-
-            self._pos_cache[text] = content_words
-            return content_words
+                if pos not in CONTENT_POS_TAGS:
+                    continue
+                clean_token = _clean_alnum(token)
+                if not clean_token:
+                    continue
+                if lemmatize:
+                    tokens.append(lemmatize_english_token(clean_token, pos))
+                else:
+                    tokens.append(clean_token)
+            self._token_cache[cache_key] = tokens
+            return list(tokens)
         except Exception:
-            return self._extract_content_words_fallback(text)
+            tokens = self._extract_content_word_tokens_fallback(
+                text, lemmatize=lemmatize
+            )
+            self._token_cache[cache_key] = tokens
+            return list(tokens)
+
+    def _extract_content_word_tokens_fallback(
+        self, text: str, *, lemmatize: bool = False
+    ) -> List[str]:
+        tokens: List[str] = []
+        for token in text.lower().split():
+            clean_token = _clean_alnum(token)
+            if (
+                clean_token
+                and len(clean_token) > 2
+                and clean_token not in _FUNCTION_WORDS_FALLBACK
+            ):
+                if lemmatize:
+                    tokens.append(lemmatize_english_token(clean_token))
+                else:
+                    tokens.append(clean_token)
+        return tokens
 
     def _extract_content_words_fallback(self, text: str) -> Set[str]:
-        function_words = {
-            "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with",
-            "by", "from", "as", "is", "are", "am", "was", "were", "be", "been", "being",
-            "have", "has", "had", "do", "does", "did", "will", "would", "should", "could",
-            "may", "might", "can", "must", "shall", "it", "its", "this", "that", "these",
-            "those", "i", "you", "he", "she", "we", "they", "me", "him", "her", "us", "them",
-            "my", "your", "his", "our", "their", "if", "then", "so", "what", "when",
-            "where", "why", "how", "all", "each", "every", "no", "not", "only", "just", "very",
-        }
-
-        content_words = set()
-        for token in text.lower().split():
-            clean_token = "".join(c for c in token if c.isalnum())
-            if clean_token and len(clean_token) > 2 and clean_token not in function_words:
-                content_words.add(clean_token)
-        return content_words
+        return set(self._extract_content_word_tokens_fallback(text))
 
     def calculate_a1_word_ratio(
         self, text: str, a1_vocab: Set[str]

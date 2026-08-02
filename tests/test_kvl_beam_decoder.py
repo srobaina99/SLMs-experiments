@@ -108,6 +108,7 @@ class TestKvlBeamDecoderPreference:
         assert result.text == "friend play"
         assert result.running_mean == pytest.approx(1.55)
         assert result.words_scored == 2
+        assert result.hit_max_tokens is True
 
     def test_tiebreak_equal_kvl_mean_by_logprob(self, tmp_path):
         lookup_dir = tmp_path / "kvl"
@@ -344,6 +345,7 @@ class TestKvlBeamDecoderStopTokens:
         assert result.text == "fundamentally "
         assert result.steps_total == 2
         assert TOK_STOP not in result.token_ids
+        assert result.hit_max_tokens is False
 
     def test_skips_empty_token_stop_finish(self, fixture_lookup):
         """TinyLlama-style early EOS (empty after rollback) must not halt decode."""

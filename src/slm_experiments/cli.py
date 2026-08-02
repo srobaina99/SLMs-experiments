@@ -6,6 +6,10 @@ import argparse
 import sys
 from pathlib import Path
 
+from slm_experiments.evaluation.assessment.cefr_tsar import (
+    DEFAULT_BATCH_SIZE as TSAR_DEFAULT_BATCH_SIZE,
+)
+
 _EPILOG = """
 Quick start
   slm_experiments phase1
@@ -24,6 +28,15 @@ Phase 2 sweeps
 Human review
   slm_experiments human export --run-id <run_id>
   slm_experiments human import --run-id <run_id> --tags human_review.csv
+  slm_experiments human study-export --assessment-run-id <id>
+  slm_experiments human study-import --assessment-run-id <id> --ratings ratings.csv
+
+Assessment
+  slm_experiments assess build --source-run-ids <id> [<id> ...]
+  slm_experiments assess build --source-run-ids <id> --sample 100
+  slm_experiments assess analyze --assessment-run-id <id>
+  slm_experiments assess judge-export --assessment-run-id <id>
+  slm_experiments assess judge-import --assessment-run-id <id> --scores judge_scores.csv
 
 Results are written to results/runs/<run_id>/.
 Run `slm_experiments <command> --help` for command-specific examples.
@@ -321,13 +334,18 @@ def _build_parser() -> argparse.ArgumentParser:
 
     human_parser = subparsers.add_parser(
         "human",
-        help="Export/import human evaluation tags",
-        description="Round-trip human review labels into a run bundle.",
+        help="Export/import human evaluation tags (legacy + blinded study)",
+        description=(
+            "Legacy single-rater round-trip, or three-rater blinded study "
+            "export/import against an assessment bundle."
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=_examples(
             "slm_experiments human export --run-id 20260606_120000_phase1_factorial",
             "slm_experiments human export --run-id <id> --sample 60",
             "slm_experiments human import --run-id <id> --tags results/runs/<id>/human_review.csv",
+            "slm_experiments human study-export --assessment-run-id <id>",
+            "slm_experiments human study-import --assessment-run-id <id> --ratings ratings.csv",
         ),
     )
     human_sub = human_parser.add_subparsers(dest="human_cmd", required=True)
@@ -372,6 +390,215 @@ def _build_parser() -> argparse.ArgumentParser:
         required=True,
         metavar="PATH",
         help="CSV with experiment_id and tag columns",
+    )
+    human_study_export = human_sub.add_parser(
+        "study-export",
+        help="Export blinded three-rater sheets from an assessment bundle",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_examples(
+            "slm_experiments human study-export --assessment-run-id 20260801_120000_assessment_beginner_suitability",
+            "slm_experiments human study-export --assessment-run-id <id> --sample 100 --calibration 10",
+        ),
+    )
+    human_study_export.add_argument(
+        "--assessment-run-id",
+        required=True,
+        metavar="ID",
+        help="Assessment bundle id under results/runs/",
+    )
+    human_study_export.add_argument(
+        "--sample",
+        type=int,
+        default=100,
+        metavar="N",
+        help="Analysis sample size after calibration exclusion (default: %(default)s)",
+    )
+    human_study_export.add_argument(
+        "--calibration",
+        type=int,
+        default=10,
+        metavar="N",
+        help="Calibration pilot size excluded from analysis (default: %(default)s)",
+    )
+    human_study_export.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        metavar="N",
+        help="Sampling / shuffle seed (default: %(default)s)",
+    )
+    human_study_export.add_argument(
+        "--raters",
+        default="r1,r2,r3",
+        metavar="IDS",
+        help="Comma-separated rater ids (default: %(default)s)",
+    )
+    human_study_export.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite study/ even if imported ratings already exist",
+    )
+    human_study_import = human_sub.add_parser(
+        "study-import",
+        help="Import long-format (or single-sheet) ratings into the study bundle",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_examples(
+            "slm_experiments human study-import --assessment-run-id <id> --ratings ratings.csv",
+            "slm_experiments human study-import --assessment-run-id <id> --ratings rater_r1.csv --rater-id r1",
+        ),
+    )
+    human_study_import.add_argument(
+        "--assessment-run-id",
+        required=True,
+        metavar="ID",
+        help="Assessment bundle id that owns the study/ directory",
+    )
+    human_study_import.add_argument(
+        "--ratings",
+        required=True,
+        metavar="PATH",
+        help="Long-format ratings CSV, or a filled rater sheet with --rater-id",
+    )
+    human_study_import.add_argument(
+        "--rater-id",
+        default=None,
+        metavar="ID",
+        help="If set, treat --ratings as one blind rater sheet for this rater",
+    )
+
+    assess_parser = subparsers.add_parser(
+        "assess",
+        help="Build assessment bundles and LLM-judge seam artifacts",
+        description=(
+            "Ingest generation runs into an immutable assessment bundle "
+            "(kind=assessment), or export/import the provider-neutral LLM-judge "
+            "seam. Never mutates source generation runs. No judge API adapter."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_examples(
+            "slm_experiments assess build --source-run-ids 20260606_120000_phase2_weights",
+            "slm_experiments assess build --source-run-ids <id1> <id2> --sample 100",
+            "slm_experiments assess analyze --assessment-run-id <id>",
+            "slm_experiments assess judge-export --assessment-run-id <id>",
+            "slm_experiments assess judge-import --assessment-run-id <id> --scores judge_scores.csv",
+        ),
+    )
+    assess_sub = assess_parser.add_subparsers(dest="assess_cmd", required=True)
+    assess_build = assess_sub.add_parser(
+        "build",
+        help="Freeze source runs into an assessment bundle",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_examples(
+            "slm_experiments assess build --source-run-ids 20260606_120000_phase2_weights",
+            "slm_experiments assess build --source-run-ids <id1> <id2> --sample 100 --seed 42",
+        ),
+    )
+    assess_build.add_argument(
+        "--source-run-ids",
+        nargs="+",
+        required=True,
+        metavar="ID",
+        help="One or more generation run ids under results/runs/",
+    )
+    assess_build.add_argument(
+        "--sample",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Optional cap on unique items (default: keep all)",
+    )
+    assess_build.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for item sampling (default: %(default)s)",
+    )
+    assess_build.add_argument(
+        "--cefr-tsar-device",
+        default=None,
+        metavar="DEVICE",
+        help="Torch device for TSAR scoring (default: auto-detect)",
+    )
+    assess_build.add_argument(
+        "--cefr-tsar-batch-size",
+        type=int,
+        default=TSAR_DEFAULT_BATCH_SIZE,
+        metavar="N",
+        help="Batch size for TSAR classifiers (default: %(default)s)",
+    )
+    assess_build.add_argument(
+        "--no-plot",
+        action="store_true",
+        help="No-op for ClusterUY parity (assess never plots)",
+    )
+
+    assess_analyze = assess_sub.add_parser(
+        "analyze",
+        help="Paired-delta + percentile bootstrap analysis on an assessment bundle",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_examples(
+            "slm_experiments assess analyze --assessment-run-id 20260801_120000_assessment_beginner_suitability",
+            "slm_experiments assess analyze --assessment-run-id <id> --bootstrap-seed 42 --resamples 10000",
+        ),
+    )
+    assess_analyze.add_argument(
+        "--assessment-run-id",
+        required=True,
+        metavar="ID",
+        help="Assessment bundle id under results/runs/",
+    )
+    assess_analyze.add_argument(
+        "--bootstrap-seed",
+        type=int,
+        default=42,
+        help="Bootstrap RNG seed recorded in manifest.analysis (default: %(default)s)",
+    )
+    assess_analyze.add_argument(
+        "--resamples",
+        type=int,
+        default=10_000,
+        help="Number of bootstrap resamples (default: %(default)s)",
+    )
+
+    assess_judge_export = assess_sub.add_parser(
+        "judge-export",
+        help="Export provider-neutral judge_input.jsonl from an assessment bundle",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_examples(
+            "slm_experiments assess judge-export --assessment-run-id 20260801_120000_assessment_beginner_suitability",
+        ),
+    )
+    assess_judge_export.add_argument(
+        "--assessment-run-id",
+        required=True,
+        metavar="ID",
+        help="Assessment bundle id under results/runs/",
+    )
+    assess_judge_export.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite judge/ even if imported judge_scores.csv already exists",
+    )
+
+    assess_judge_import = assess_sub.add_parser(
+        "judge-import",
+        help="Import validated judge_scores.csv (no API; strict schema)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_examples(
+            "slm_experiments assess judge-import --assessment-run-id <id> --scores judge_scores.csv",
+        ),
+    )
+    assess_judge_import.add_argument(
+        "--assessment-run-id",
+        required=True,
+        metavar="ID",
+        help="Assessment bundle id under results/runs/",
+    )
+    assess_judge_import.add_argument(
+        "--scores",
+        required=True,
+        metavar="CSV",
+        help="Path to judge_scores.csv matching schema judge_scores_v0",
     )
 
     return parser
@@ -518,6 +745,111 @@ def main(argv: list[str] | None = None) -> None:
         print(f"Updated {updated} rows in full.csv")
         return
 
+    if args.command == "human" and args.human_cmd == "study-export":
+        from slm_experiments.human.study_export import StudyExporter
+
+        rater_ids = [r.strip() for r in args.raters.split(",") if r.strip()]
+        exporter = StudyExporter()
+        study_dir, n_items = exporter.export(
+            assessment_run_id=args.assessment_run_id,
+            sample=args.sample,
+            calibration=args.calibration,
+            seed=args.seed,
+            raters=rater_ids,
+            force=args.force,
+        )
+        print(f"Study export complete: {n_items} analysis items")
+        print(f"Output: {study_dir.resolve()}")
+        return
+
+    if args.command == "human" and args.human_cmd == "study-import":
+        from slm_experiments.human.study_import import StudyImporter
+
+        importer = StudyImporter()
+        summary = importer.import_ratings(
+            assessment_run_id=args.assessment_run_id,
+            ratings_path=args.ratings,
+            rater_id=args.rater_id,
+        )
+        print(
+            f"Imported {summary['n_ratings']} ratings "
+            f"({summary['n_items']} items, {summary['n_raters']} raters)"
+        )
+        if summary.get("n_items_consensus") is not None:
+            print(
+                f"Consensus items: {summary['n_items_consensus']} "
+                f"(incomplete: {summary.get('n_items_incomplete', 0)})"
+            )
+        if summary.get("warning"):
+            print(f"Warning: {summary['warning']}")
+        print(f"Ratings: {summary['ratings_path'].resolve()}")
+        print(f"Reliability: {summary['reliability_path'].resolve()}")
+        return
+
+    if args.command == "assess" and args.assess_cmd == "build":
+        from slm_experiments.evaluation.assessment import AssessmentBundler
+
+        cli_args = list(normalized_argv) if normalized_argv is not None else []
+        bundler = AssessmentBundler()
+        run_id, out_dir = bundler.build(
+            source_run_ids=args.source_run_ids,
+            sample=args.sample,
+            seed=args.seed,
+            cli_args=cli_args,
+            cefr_tsar_device=args.cefr_tsar_device,
+            cefr_tsar_batch_size=args.cefr_tsar_batch_size,
+        )
+        print(f"Assessment bundle complete: {run_id}")
+        print(f"Output: {Path(out_dir).resolve()}")
+        return
+
+    if args.command == "assess" and args.assess_cmd == "analyze":
+        from slm_experiments.evaluation.assessment.analysis import (
+            analyze_assessment_bundle,
+        )
+
+        analysis_dir = analyze_assessment_bundle(
+            args.assessment_run_id,
+            bootstrap_seed=args.bootstrap_seed,
+            resamples=args.resamples,
+        )
+        print(f"Analysis complete: {args.assessment_run_id}")
+        print(f"Output: {Path(analysis_dir).resolve()}")
+        return
+
+    if args.command == "assess" and args.assess_cmd == "judge-export":
+        from slm_experiments.evaluation.assessment.judge import JudgeExporter
+
+        judge_dir, n_items = JudgeExporter().export(
+            args.assessment_run_id,
+            force=args.force,
+        )
+        print(f"Exported {n_items} judge-input items")
+        print(f"Judge dir: {judge_dir.resolve()}")
+        return
+
+    if args.command == "assess" and args.assess_cmd == "judge-import":
+        from slm_experiments.evaluation.assessment.judge import JudgeImporter
+
+        summary = JudgeImporter().import_scores(
+            args.assessment_run_id,
+            args.scores,
+        )
+        coverage = (
+            f"{summary['n_items']}/{summary['n_items_expected']} items"
+            if "n_items_expected" in summary
+            else f"{summary['n_items']} items"
+        )
+        print(f"Imported {summary['n_scores']} judge scores ({coverage})")
+        if summary.get("coverage_complete") is False:
+            print(
+                "WARNING: partial judge coverage — "
+                f"scores cover {summary['n_items']} of "
+                f"{summary['n_items_expected']} expected items"
+            )
+        print(f"Scores: {summary['scores_path'].resolve()}")
+        return
+
     if args.command == "plot":
         from slm_experiments.plot import plot_run
 
@@ -535,131 +867,225 @@ def main(argv: list[str] | None = None) -> None:
             print("No runs found.")
             return
 
-        print(f"{'RUN ID':<40} {'PHASE':<6} {'EXPERIMENT':<12} {'STARTED':<26} {'OBS':<12}")
-        print("-" * 100)
+        print(
+            f"{'RUN ID':<42} {'KIND':<12} {'PHASE':<12} "
+            f"{'EXPERIMENT':<22} {'STARTED':<26} {'OBS':<12}"
+        )
+        print("-" * 130)
         for manifest in manifests:
             obs = manifest.get("observations", {})
-            obs_label = f"{obs.get('successful', 0)}/{obs.get('total', 0)}"
+            kind = manifest.get("kind", "generation")
+            if kind == "assessment":
+                # items / source-row total
+                obs_label = f"{obs.get('items', 0)}/{obs.get('total', 0)}"
+            else:
+                obs_label = f"{obs.get('successful', 0)}/{obs.get('total', 0)}"
             print(
-                f"{manifest.get('run_id', ''):<40} "
-                f"{str(manifest.get('phase', '')):<6} "
-                f"{manifest.get('experiment', ''):<12} "
+                f"{manifest.get('run_id', ''):<42} "
+                f"{str(kind):<12} "
+                f"{str(manifest.get('phase', '')):<12} "
+                f"{str(manifest.get('experiment', '')):<22} "
                 f"{manifest.get('started_at', ''):<26} "
                 f"{obs_label:<12}"
             )
         return
 
     if args.command == "runs" and args.runs_cmd == "show":
-        from slm_experiments.core.run_store import RunStore
+        from slm_experiments.core.run_store import KIND_ASSESSMENT, RunStore
         from slm_experiments.models.base import REPO_ROOT
 
         store = RunStore(Path(REPO_ROOT) / "results")
         try:
             manifest = store.read_manifest(args.run_id)
+        except FileNotFoundError:
+            print(f"Run not found: {args.run_id}", file=sys.stderr)
+            sys.exit(1)
+
+        kind = manifest.get("kind", "generation")
+        if kind == KIND_ASSESSMENT:
+            summary = None
+            try:
+                summary = store.read_summary(args.run_id)
+            except FileNotFoundError:
+                pass
+            _print_assessment_run(manifest, summary)
+            return
+
+        try:
             summary = store.read_summary(args.run_id)
         except FileNotFoundError:
             print(f"Run not found: {args.run_id}", file=sys.stderr)
             sys.exit(1)
 
-        print(f"Run: {manifest.get('run_id')}")
-        print(f"Phase: {manifest.get('phase')}  Experiment: {manifest.get('experiment')}")
-        print(f"Started:  {manifest.get('started_at')}")
-        print(f"Completed: {manifest.get('completed_at')}")
-        print(f"Models: {', '.join(manifest.get('models', []))}")
-        print(f"Prompts: {manifest.get('prompt_count')}")
-        obs = manifest.get("observations", {})
-        print(
-            f"Observations: {obs.get('total', 0)} total, "
-            f"{obs.get('successful', 0)} successful, "
-            f"{obs.get('failed', 0)} failed"
-        )
-        if manifest.get("cli_args"):
-            print(f"CLI args: {' '.join(manifest['cli_args'])}")
-
-        print("\nSummary (successful generations only):")
-        overall = summary.get("overall", {})
-        for metric in ("flesch_kincaid_grade", "gunning_fog", "spache_readability", "word_count"):
-            if metric in overall:
-                stats = overall[metric]
-                print(
-                    f"  {metric}: mean={stats['mean']:.2f}, "
-                    f"std={stats['std']:.2f}, "
-                    f"min={stats['min']:.2f}, max={stats['max']:.2f}"
-                )
-
-        by_config = summary.get("by_config", {})
-        if by_config:
-            print("\nBy configuration:")
-            for config_name, config_stats in by_config.items():
-                count = config_stats.get("count", 0)
-                fk = config_stats.get("flesch_kincaid_grade", {}).get("mean")
-                if fk is not None:
-                    print(f"  {config_name}: n={count}, FK mean={fk:.2f}")
-                else:
-                    print(f"  {config_name}: n={count}")
-
-        sweep_dimension = summary.get("metadata", {}).get("sweep_dimension")
-        sweep_sections = {
-            "weight_factor": "by_weight_factor",
-            "beam_width": "by_beam_width",
-            "kvl_beam_width": "by_kvl_beam_width",
-            "num_shots": "by_num_shots",
-            "guided_top_k": "by_guided_top_k",
-        }
-        sweep_section = sweep_sections.get(sweep_dimension or "")
-        sweep_stats = summary.get(sweep_section or "", {})
-        if sweep_stats:
-            print(f"\nBy {sweep_dimension} (pooled):")
-            for group_name, group_stats in sweep_stats.items():
-                count = group_stats.get("count", 0)
-                fk = group_stats.get("flesch_kincaid_grade", {}).get("mean")
-                a1 = group_stats.get("a1_pass_rate")
-                extras = []
-                if fk is not None:
-                    extras.append(f"FK mean={fk:.2f}")
-                if a1 is not None:
-                    extras.append(f"a1_pass_rate={a1:.2f}")
-                suffix = f", {', '.join(extras)}" if extras else ""
-                print(f"  {group_name}: n={count}{suffix}")
-
-        by_model = summary.get("by_model", {})
-        if by_model:
-            print("\nBy model:")
-            for model_name, model_stats in by_model.items():
-                count = model_stats.get("count", 0)
-                a1 = model_stats.get("a1_pass_rate")
-                fail = model_stats.get("generation_failure_rate")
-                parts = [f"n={count}"]
-                if a1 is not None:
-                    parts.append(f"a1_pass_rate={a1:.2f}")
-                if fail is not None:
-                    parts.append(f"failure_rate={fail:.2f}")
-                print(f"  {model_name}: {', '.join(parts)}")
-                nested_sweep = model_stats.get(sweep_section or "", {})
-                if nested_sweep:
-                    for group_name, group_stats in nested_sweep.items():
-                        g_count = group_stats.get("count", 0)
-                        g_a1 = group_stats.get("a1_pass_rate")
-                        g_fk = group_stats.get("flesch_kincaid_grade", {}).get("mean")
-                        g_parts = [f"n={g_count}"]
-                        if g_a1 is not None:
-                            g_parts.append(f"a1_pass_rate={g_a1:.2f}")
-                        if g_fk is not None:
-                            g_parts.append(f"FK mean={g_fk:.2f}")
-                        print(f"    {group_name}: {', '.join(g_parts)}")
-                nested_config = model_stats.get("by_config", {})
-                if nested_config and not nested_sweep:
-                    for config_name, config_stats in nested_config.items():
-                        c_count = config_stats.get("count", 0)
-                        c_a1 = config_stats.get("a1_pass_rate")
-                        c_fk = config_stats.get("flesch_kincaid_grade", {}).get("mean")
-                        c_parts = [f"n={c_count}"]
-                        if c_a1 is not None:
-                            c_parts.append(f"a1_pass_rate={c_a1:.2f}")
-                        if c_fk is not None:
-                            c_parts.append(f"FK mean={c_fk:.2f}")
-                        print(f"    {config_name}: {', '.join(c_parts)}")
+        _print_generation_run(manifest, summary)
         return
 
     print(f"Not implemented: {args.command}", file=sys.stderr)
     sys.exit(1)
+
+
+def _print_assessment_run(manifest: dict, summary: dict | None = None) -> None:
+    print(f"Run: {manifest.get('run_id')}")
+    print(f"Kind: assessment")
+    print(f"Phase: {manifest.get('phase')}  Experiment: {manifest.get('experiment')}")
+    print(f"Started:  {manifest.get('started_at')}")
+    print(f"Completed: {manifest.get('completed_at')}")
+    source_ids = manifest.get("source_run_ids") or []
+    print(f"Source runs: {', '.join(source_ids) if source_ids else '(none)'}")
+    obs = manifest.get("observations", {})
+    print(
+        f"Items: {obs.get('items', 0)} unique  |  "
+        f"item_map rows: {obs.get('item_map_rows', 0)}  |  "
+        f"source rows: {obs.get('total', 0)} "
+        f"({obs.get('successful', 0)} ok, {obs.get('failed', 0)} failed)"
+    )
+    print(f"Rubric: {manifest.get('rubric_version', '')}")
+    sampling = manifest.get("sampling") or {}
+    if sampling:
+        print(
+            f"Sampling: strategy={sampling.get('strategy')}, "
+            f"requested={sampling.get('sample_requested')}, "
+            f"seed={sampling.get('sample_seed')}, "
+            f"items={sampling.get('items_before_sample')}→{sampling.get('items_after_sample')}"
+        )
+    deps = manifest.get("dependency_versions") or {}
+    if deps:
+        dep_label = ", ".join(f"{k}={v}" for k, v in sorted(deps.items()))
+        print(f"Dependencies: {dep_label}")
+    scorers = manifest.get("registered_scorers") or []
+    print(f"Registered scorers: {', '.join(scorers) if scorers else '(none)'}")
+    if summary:
+        overall = summary.get("overall") or {}
+        print(
+            "TSAR cross-check (diagnostic, not an A1 gate): "
+            f"mean_ordinal={overall.get('cefr_tsar_mean_ordinal')}, "
+            f"predicted_a1_rate={overall.get('cefr_tsar_predicted_a1_rate')}, "
+            f"disagreement_rate={overall.get('cefr_tsar_disagreement_rate')} | "
+            f"failure_rate={overall.get('generation_failure_rate')}, "
+            f"hit_max_tokens_rate={overall.get('hit_max_tokens_rate')}"
+        )
+    if manifest.get("cli_args"):
+        print(f"CLI args: {' '.join(manifest['cli_args'])}")
+
+
+def _print_generation_run(manifest: dict, summary: dict) -> None:
+    print(f"Run: {manifest.get('run_id')}")
+    print(f"Kind: {manifest.get('kind', 'generation')}")
+    print(f"Phase: {manifest.get('phase')}  Experiment: {manifest.get('experiment')}")
+    print(f"Started:  {manifest.get('started_at')}")
+    print(f"Completed: {manifest.get('completed_at')}")
+    print(f"Models: {', '.join(manifest.get('models', []))}")
+    print(f"Prompts: {manifest.get('prompt_count')}")
+    obs = manifest.get("observations", {})
+    print(
+        f"Observations: {obs.get('total', 0)} total, "
+        f"{obs.get('successful', 0)} successful, "
+        f"{obs.get('failed', 0)} failed"
+    )
+    if manifest.get("cli_args"):
+        print(f"CLI args: {' '.join(manifest['cli_args'])}")
+
+    print("\nSummary (successful generations only):")
+    overall = summary.get("overall", {})
+    for metric in ("flesch_kincaid_grade", "gunning_fog", "spache_readability", "word_count"):
+        if metric in overall:
+            stats = overall[metric]
+            print(
+                f"  {metric}: mean={stats['mean']:.2f}, "
+                f"std={stats['std']:.2f}, "
+                f"min={stats['min']:.2f}, max={stats['max']:.2f}"
+            )
+
+    by_config = summary.get("by_config", {})
+    if by_config:
+        print("\nBy configuration:")
+        for config_name, config_stats in by_config.items():
+            count = config_stats.get("count", 0)
+            fk = config_stats.get("flesch_kincaid_grade", {}).get("mean")
+            if fk is not None:
+                print(f"  {config_name}: n={count}, FK mean={fk:.2f}")
+            else:
+                print(f"  {config_name}: n={count}")
+
+    sweep_dimension = summary.get("metadata", {}).get("sweep_dimension")
+    sweep_sections = {
+        "weight_factor": "by_weight_factor",
+        "beam_width": "by_beam_width",
+        "kvl_beam_width": "by_kvl_beam_width",
+        "num_shots": "by_num_shots",
+        "guided_top_k": "by_guided_top_k",
+    }
+    sweep_section = sweep_sections.get(sweep_dimension or "")
+    sweep_stats = summary.get(sweep_section or "", {})
+    if sweep_stats:
+        print(f"\nBy {sweep_dimension} (pooled):")
+        for group_name, group_stats in sweep_stats.items():
+            count = group_stats.get("count", 0)
+            fk = group_stats.get("flesch_kincaid_grade", {}).get("mean")
+            a1 = group_stats.get("a1_pass_rate")
+            fail = group_stats.get("generation_failure_rate")
+            maxed = group_stats.get("hit_max_tokens_rate")
+            extras = []
+            if fk is not None:
+                extras.append(f"FK mean={fk:.2f}")
+            if a1 is not None:
+                extras.append(f"a1_pass_rate={a1:.2f}")
+            if fail is not None:
+                extras.append(f"failure_rate={fail:.2f}")
+            if maxed is not None:
+                extras.append(f"maxed_out_rate={maxed:.2f}")
+            suffix = f", {', '.join(extras)}" if extras else ""
+            print(f"  {group_name}: n={count}{suffix}")
+
+    by_model = summary.get("by_model", {})
+    if by_model:
+        print("\nBy model:")
+        for model_name, model_stats in by_model.items():
+            count = model_stats.get("count", 0)
+            a1 = model_stats.get("a1_pass_rate")
+            fail = model_stats.get("generation_failure_rate")
+            maxed = model_stats.get("hit_max_tokens_rate")
+            parts = [f"n={count}"]
+            if a1 is not None:
+                parts.append(f"a1_pass_rate={a1:.2f}")
+            if fail is not None:
+                parts.append(f"failure_rate={fail:.2f}")
+            if maxed is not None:
+                parts.append(f"maxed_out_rate={maxed:.2f}")
+            print(f"  {model_name}: {', '.join(parts)}")
+            nested_sweep = model_stats.get(sweep_section or "", {})
+            if nested_sweep:
+                for group_name, group_stats in nested_sweep.items():
+                    g_count = group_stats.get("count", 0)
+                    g_a1 = group_stats.get("a1_pass_rate")
+                    g_fk = group_stats.get("flesch_kincaid_grade", {}).get("mean")
+                    g_fail = group_stats.get("generation_failure_rate")
+                    g_maxed = group_stats.get("hit_max_tokens_rate")
+                    g_parts = [f"n={g_count}"]
+                    if g_a1 is not None:
+                        g_parts.append(f"a1_pass_rate={g_a1:.2f}")
+                    if g_fail is not None:
+                        g_parts.append(f"failure_rate={g_fail:.2f}")
+                    if g_maxed is not None:
+                        g_parts.append(f"maxed_out_rate={g_maxed:.2f}")
+                    if g_fk is not None:
+                        g_parts.append(f"FK mean={g_fk:.2f}")
+                    print(f"    {group_name}: {', '.join(g_parts)}")
+            nested_config = model_stats.get("by_config", {})
+            if nested_config and not nested_sweep:
+                for config_name, config_stats in nested_config.items():
+                    c_count = config_stats.get("count", 0)
+                    c_a1 = config_stats.get("a1_pass_rate")
+                    c_fk = config_stats.get("flesch_kincaid_grade", {}).get("mean")
+                    c_fail = config_stats.get("generation_failure_rate")
+                    c_maxed = config_stats.get("hit_max_tokens_rate")
+                    c_parts = [f"n={c_count}"]
+                    if c_a1 is not None:
+                        c_parts.append(f"a1_pass_rate={c_a1:.2f}")
+                    if c_fail is not None:
+                        c_parts.append(f"failure_rate={c_fail:.2f}")
+                    if c_maxed is not None:
+                        c_parts.append(f"maxed_out_rate={c_maxed:.2f}")
+                    if c_fk is not None:
+                        c_parts.append(f"FK mean={c_fk:.2f}")
+                    print(f"    {config_name}: {', '.join(c_parts)}")

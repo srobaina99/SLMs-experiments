@@ -12,8 +12,9 @@ import matplotlib.pyplot as plt  # noqa: E402
 import pandas as pd  # noqa: E402
 import seaborn as sns  # noqa: E402
 
-from slm_experiments.core.run_store import RunStore
+from slm_experiments.core.run_store import KIND_ASSESSMENT, RunStore
 from slm_experiments.models.base import REPO_ROOT
+
 
 sns.set_theme(style="whitegrid")
 
@@ -175,6 +176,12 @@ def plot_run(
         raise FileNotFoundError(f"Run not found: {run_id}")
 
     manifest = store.read_manifest(run_id)
+    if manifest.get("kind", "generation") == KIND_ASSESSMENT:
+        raise ValueError(
+            f"run {run_id} is an assessment bundle; plot requires a generation "
+            f"run. Use `assess analyze --assessment-run-id {run_id}` for "
+            f"assessment analysis, not plot."
+        )
     experiment = manifest.get("experiment", "factorial")
 
     df = _load_run_dataframe(run_dir)

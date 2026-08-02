@@ -96,10 +96,15 @@ def _build_factorial_bundle(tmp_path: Path, num_prompts: int = 3) -> tuple[str, 
 
 class TestConfigLabel:
     def test_config_labels(self):
+        from slm_experiments.core.config_label import config_label as shared_label
+
         assert config_label(False, False) == "control"
         assert config_label(True, False) == "weighting_only"
         assert config_label(False, True) == "prompting_only"
         assert config_label(True, True) == "both"
+        # human.export re-exports the shared core helper (Batch D2).
+        assert config_label is shared_label
+        assert shared_label(True, True) == "both"
 
 
 class TestStratifiedSample:
@@ -199,6 +204,45 @@ class TestHumanImport:
         with pytest.raises(ValueError, match="unknown experiment_id"):
             importer.import_tags(run_id, bad_path)
 
+    def test_import_rejects_missing_columns_and_duplicate_experiment_id(
+        self, tmp_path: Path
+    ):
+        run_id, store = _build_factorial_bundle(tmp_path, num_prompts=2)
+        exporter = HumanExporter(results_root=tmp_path)
+        out_path, _ = exporter.export(run_id, sample=2, seed=42)
+        importer = HumanImporter(results_root=tmp_path)
+
+        missing_cols = pd.DataFrame(
+            {"experiment_id": ["x"], "response_appropriateness": [3]}
+        )
+        missing_path = store.run_dir(run_id) / "missing_cols.csv"
+        missing_cols.to_csv(missing_path, index=False)
+        with pytest.raises(ValueError, match="Tags CSV missing columns"):
+            importer.import_tags(run_id, missing_path)
+
+        no_exp_id = pd.DataFrame(
+            {
+                "response_appropriateness": [3],
+                "vocabulary_level": ["beginner"],
+                "notes": [""],
+            }
+        )
+        no_id_path = store.run_dir(run_id) / "no_experiment_id.csv"
+        no_exp_id.to_csv(no_id_path, index=False)
+        with pytest.raises(
+            ValueError, match="Tags CSV must include an experiment_id column"
+        ):
+            importer.import_tags(run_id, no_id_path)
+
+        review = pd.read_csv(out_path)
+        dup = pd.concat([review, review.iloc[[0]]], ignore_index=True)
+        dup_path = store.run_dir(run_id) / "dup_tags.csv"
+        dup.to_csv(dup_path, index=False)
+        with pytest.raises(
+            ValueError, match="Tags CSV contains duplicate experiment_id values"
+        ):
+            importer.import_tags(run_id, dup_path)
+
 
 class TestHumanRoundTrip:
     def test_export_import_round_trip(self, tmp_path: Path):
@@ -225,3 +269,21 @@ class TestHumanRoundTrip:
 
         manifest = json.loads((store.run_dir(run_id) / "manifest.json").read_text())
         assert manifest["human_eval"]["updated_rows"] == exported_count
+
+
+class TestLegacyExportKindGuard:
+    def test_export_rejects_assessment_bundle(self, tmp_path: Path):
+        from slm_experiments.evaluation.assessment import AssessmentBundler
+
+        run_id, store = _build_factorial_bundle(tmp_path, num_prompts=2)
+        assess_id, _ = AssessmentBundler(results_root=tmp_path).build(
+            [run_id], seed=42
+        )
+        exporter = HumanExporter(results_root=tmp_path)
+        with pytest.raises(ValueError, match="study-export"):
+            exporter.export(assess_id, sample=2)
+        # Generation export still works.
+        out_path, n = exporter.export(run_id, sample=2)
+        assert n == 2
+        assert out_path.exists()
+        assert store.run_dir(run_id).exists()

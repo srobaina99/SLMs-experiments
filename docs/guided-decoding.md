@@ -9,7 +9,7 @@ This is **not** best-of-N reranking (deprecated `BeamSearchGenerator`) and **not
 **CLI:** `phase2 guided`  
 **Accurate label:** *top-k A1-constrained greedy decoding*
 
-See also: [interventions.md](interventions.md), [metrics.md](metrics.md) (readability proxy), [guided-decoding-flow.html](guided-decoding-flow.html) (visual walkthrough; `top_k` → `guided_top_k`, no `top_p`).
+See also: [interventions.md](interventions.md), [metrics.md](metrics.md) (CEFR-SP A1 gate; FK/Fog/Spache descriptive), [guided-decoding-flow.html](guided-decoding-flow.html) (visual walkthrough; `top_k` → `guided_top_k`, no `top_p`).
 
 ---
 
@@ -41,7 +41,7 @@ CLI: phase2 guided
 ### One observation
 
 1. `GuidedSweepRunner` loads each model once per model batch.
-2. For each `(config, prompt)`: `pipeline.run_guided()` → `generate_guided()` → constrained decode → format → evaluate → `meets_a1_criteria` (readability proxy).
+2. For each `(config, prompt)`: `pipeline.run_guided()` → `generate_guided()` → constrained decode → format → evaluate → `meets_a1_criteria` (CEFR-SP document-level A1).
 3. Results land in the usual run bundle (`full.csv`, `specification.csv`, `summary.json`).
 
 ### CLI examples
@@ -390,7 +390,7 @@ ExperimentConfig(
 Same framework metrics as other sweeps:
 
 - **`generation_successful`** — non-empty valid output
-- **`meets_a1_criteria`** — FK≤5 ∧ Fog≤6 ∧ Spache≤4 on valid generations
+- **`meets_a1_criteria`** — CEFR-SP document-level A1 (`cefr_sp_level == "A1"`) on valid generations; FK / Fog / Spache are descriptive only
 - **`summary.json`** → `by_guided_top_k[*].a1_pass_rate`
 
 **New diagnostics:**

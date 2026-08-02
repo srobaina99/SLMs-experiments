@@ -31,6 +31,7 @@ class ExperimentResult:
 
     response_time_seconds: float
     generation_successful: bool = True
+    hit_max_tokens: bool = False
     meets_a1_criteria: bool = False
     num_shots: int = 0
 
@@ -98,6 +99,7 @@ class ExperimentResult:
         experiment_name: str = "default",
         cleaned_response: str = "",
         generation_successful: bool = True,
+        hit_max_tokens: bool = False,
         meets_a1_criteria: bool = False,
         kvl_metrics: Optional[Dict[str, Any]] = None,
         cefr_sp_metrics: Optional[Dict[str, Any]] = None,
@@ -127,6 +129,7 @@ class ExperimentResult:
             temperature=config.temperature,
             response_time_seconds=response_time,
             generation_successful=generation_successful,
+            hit_max_tokens=hit_max_tokens,
             meets_a1_criteria=meets_a1_criteria,
             flesch_kincaid_grade=grade_indices.get("flesch_kincaid_grade", 0.0),
             gunning_fog=grade_indices.get("gunning_fog", 0.0),
@@ -163,6 +166,7 @@ class ExperimentResult:
         experiment_name: str = "default",
         cleaned_response: str = "",
         generation_successful: bool = True,
+        hit_max_tokens: bool = False,
         meets_a1_criteria: bool = False,
         kvl_metrics: Optional[Dict[str, Any]] = None,
         cefr_sp_metrics: Optional[Dict[str, Any]] = None,
@@ -183,6 +187,7 @@ class ExperimentResult:
             experiment_name=experiment_name,
             cleaned_response=cleaned_response,
             generation_successful=generation_successful,
+            hit_max_tokens=hit_max_tokens,
             meets_a1_criteria=meets_a1_criteria,
             kvl_metrics=kvl_metrics,
             cefr_sp_metrics=cefr_sp_metrics,
@@ -206,6 +211,7 @@ class ExperimentResult:
         experiment_name: str = "default",
         cleaned_response: str = "",
         generation_successful: bool = True,
+        hit_max_tokens: bool = False,
         meets_a1_criteria: bool = False,
         kvl_metrics: Optional[Dict[str, Any]] = None,
         cefr_sp_metrics: Optional[Dict[str, Any]] = None,
@@ -225,6 +231,7 @@ class ExperimentResult:
             experiment_name=experiment_name,
             cleaned_response=cleaned_response,
             generation_successful=generation_successful,
+            hit_max_tokens=hit_max_tokens,
             meets_a1_criteria=meets_a1_criteria,
             kvl_metrics=kvl_metrics,
             cefr_sp_metrics=cefr_sp_metrics,
@@ -247,6 +254,7 @@ class ExperimentResult:
         experiment_name: str = "default",
         cleaned_response: str = "",
         generation_successful: bool = True,
+        hit_max_tokens: bool = False,
         meets_a1_criteria: bool = False,
         kvl_metrics: Optional[Dict[str, Any]] = None,
         cefr_sp_metrics: Optional[Dict[str, Any]] = None,
@@ -268,6 +276,7 @@ class ExperimentResult:
             experiment_name=experiment_name,
             cleaned_response=cleaned_response,
             generation_successful=generation_successful,
+            hit_max_tokens=hit_max_tokens,
             meets_a1_criteria=meets_a1_criteria,
             kvl_metrics=kvl_metrics,
             cefr_sp_metrics=cefr_sp_metrics,

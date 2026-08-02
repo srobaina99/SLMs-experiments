@@ -1,0 +1,95 @@
+# ============================================================
+# slm-thesis-eval — assessment image (torch + transformers + TSAR pins)
+#
+# Separate from the lean generation image (thesis repo Dockerfile), which
+# stays torch-free and ships llama-cpp-python for P100. This image does NOT
+# install llama-cpp-python.
+#
+# Build (from repo root):
+#   ./scripts/clusteruy/build_eval_image.sh
+#   # or:
+#   docker build --platform=linux/amd64 \
+#     -f scripts/clusteruy/Dockerfile.eval \
+#     -t srobaina99/slm-thesis-eval:latest .
+#
+# CEFR-SP .ckpt (~1.2 GB): NOT baked in (absent from git; do not download at
+# build). Bind-mount at run time if needed, e.g.:
+#   -v /path/to/level_estimator.ckpt:/workspace/data/cefr_sp/level_estimator.ckpt:ro
+# ``assess build`` joins cefr_sp_level from the source run's full.csv and does
+# not re-score CEFR-SP, so the ckpt is optional for the assess smoke path.
+#
+# P100-safe: torch pinned to cu121 wheels that include sm_60; code path never
+# uses flash_attention_2 (sm_60 → eager; else sdpa).
+# ============================================================
+# Platform pinned at build time: docker build --platform=linux/amd64 ...
+FROM nvidia/cuda:12.1.1-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3.10 \
+        python3-pip \
+        libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN ln -sf /usr/bin/python3.10 /usr/bin/python && \
+    ln -sf /usr/bin/pip3 /usr/bin/pip
+
+WORKDIR /workspace
+
+# --- deps layer (cache-friendly: pyproject/requirements before full src) ---
+COPY requirements.txt pyproject.toml ./
+
+# Skip llama-cpp-python: assess does not need it, and the runtime image has no
+# compiler / CUDA toolkit to build wheels (generation image owns that dep).
+#
+# Torch MUST come from the cu121 index with an exact pin that still ships sm_60
+# (P100). Unpinned PyPI torch floats to CUDA 13 / sm_70+ and breaks ClusterUY.
+# transformers pinned exact on 4.x (>=4.55 for ModernBERT); do not float to 5.x.
+# Arch probe: torch.cuda.get_arch_list() is empty under some driver-less builds
+# (incl. this CUDA 12.1 runtime image); fall back to _cuda_getArchFlags().
+RUN pip install --no-cache-dir --upgrade pip && \
+    grep -v '^llama-cpp-python' requirements.txt > /tmp/requirements-eval.txt && \
+    pip install --no-cache-dir \
+        --index-url https://download.pytorch.org/whl/cu121 \
+        torch==2.4.1 && \
+    python -c "import torch; \
+flags=(torch._C._cuda_getArchFlags() or '').split(); \
+arches=torch.cuda.get_arch_list() or flags; \
+assert torch.__version__.startswith('2.4.1'), torch.__version__; \
+assert str(torch.version.cuda).startswith('12.1'), torch.version.cuda; \
+assert 'sm_60' in arches, f'P100 unsupported: arches={arches!r} flags={flags!r}'; \
+print('torch', torch.__version__, 'cuda', torch.version.cuda, 'arch_list', arches)" && \
+    pip install --no-cache-dir \
+        -r /tmp/requirements-eval.txt \
+        transformers==4.55.4 \
+        pytorch-lightning==2.4.0 && \
+    python -c "import torch; \
+flags=(torch._C._cuda_getArchFlags() or '').split(); \
+arches=torch.cuda.get_arch_list() or flags; \
+assert torch.__version__.startswith('2.4.1'), torch.__version__; \
+assert 'sm_60' in arches, f'P100 unsupported after deps: arches={arches!r} flags={flags!r}'; \
+print('post-deps torch', torch.__version__, 'cuda', torch.version.cuda, 'arch_list', arches)" && \
+    rm -f /tmp/requirements-eval.txt
+
+# --- source for PYTHONPATH + SHA import in prefetch ---
+COPY src/ ./src/
+COPY scripts/clusteruy/prefetch_tsar_models.py ./scripts/clusteruy/prefetch_tsar_models.py
+
+ENV PYTHONPATH=/workspace/src
+ENV HF_HOME=/opt/hf_home
+ENV NLTK_DATA=/usr/share/nltk_data
+
+# Prefetch pinned ModernBERT SHAs (from TSAR_MODELS) + NLTK corpora (needs network).
+RUN python scripts/clusteruy/prefetch_tsar_models.py \
+        --hf-home /opt/hf_home \
+        --nltk-data /usr/share/nltk_data
+
+# Runtime defaults: no Hub fetch on air-gapped ClusterUY nodes.
+ENV TRANSFORMERS_OFFLINE=1
+ENV HF_HUB_OFFLINE=1
+
+WORKDIR /workspace
+
+# Default entry is a shell; sbatch / smoke scripts pass the assess command.
+CMD ["bash"]

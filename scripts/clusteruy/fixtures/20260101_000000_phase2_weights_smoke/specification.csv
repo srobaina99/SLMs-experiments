@@ -1,0 +1,3 @@
+model,config_weighting,config_prompting,prompt_id,answer,time_spent,generation_successful,hit_max_tokens,meets_a1_criteria,flesch_kincaid_grade,gunning_fog,spache_readability,word_count,difficult_words
+Qwen3,False,True,p01,A friend is a person you like. You talk and play.,"0,1",True,False,True,"2,0","3,0","2,0",12,0
+Phi3,True,True,p02,A dog is an animal. It is small and friendly.,"0,2",True,False,True,"1,5","2,5","1,5",10,0

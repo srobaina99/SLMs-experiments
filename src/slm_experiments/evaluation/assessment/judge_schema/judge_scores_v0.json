@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://slm-experiments.local/schemas/judge_scores_v0.json",
+  "title": "judge_scores_v0",
+  "description": "Strict per-item LLM-judge score row. Dimensions match the human study (overall_suitability, vocabulary_accessibility, syntax_accessibility, answer_adequacy) on integers 1–4. No provider fields. additionalProperties is false.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "item_id",
+    "overall_suitability",
+    "vocabulary_accessibility",
+    "syntax_accessibility",
+    "answer_adequacy"
+  ],
+  "properties": {
+    "item_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Assessment item_id from judge_input.jsonl"
+    },
+    "overall_suitability": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4
+    },
+    "vocabulary_accessibility": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4
+    },
+    "syntax_accessibility": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4
+    },
+    "answer_adequacy": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4
+    },
+    "notes": {
+      "type": ["string", "null"],
+      "description": "Optional free-text; never replaces numeric scores"
+    },
+    "judge_id": {
+      "type": ["string", "null"],
+      "description": "Optional opaque judge run label (not a provider SDK id)"
+    },
+    "rubric_version": {
+      "type": "string",
+      "description": "Must be beginner_suitability_judge_rubric_v0 (or matching human rubric version)"
+    }
+  }
+}

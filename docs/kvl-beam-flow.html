@@ -446,8 +446,9 @@
     <p class="subtitle">
       Token-by-token beam search that ranks partial hypotheses by learner vocabulary difficulty
       (KVL/GLMM scores) instead of post-hoc A1-ratio reranking over independent samples.
-      Used as a readability / vocabulary intervention in <code>SLMs-experiments</code>
-      (primary binary outcome is an automated readability proxy, not a CEFR proficiency test).
+      Used as a vocabulary-difficulty intervention in <code>SLMs-experiments</code>
+      (primary binary outcome is CEFR-SP document-level A1 / <code>meets_a1_criteria</code>,
+      not a CEFR proficiency test of a learner).
     </p>
   </header>
 
@@ -581,7 +582,7 @@
 
           <rect x="530" y="290" width="260" height="52" rx="8" fill="url(#boxGrad)" stroke="#2e3345"/>
           <text x="660" y="312" text-anchor="middle" fill="#e8eaf0" font-size="12" font-weight="600" font-family="system-ui">TextEvaluator + compute_kvl_metrics</text>
-          <text x="660" y="328" text-anchor="middle" fill="#8b92a8" font-size="10" font-family="ui-monospace">FK, Fog, Spache, meets_a1_criteria</text>
+          <text x="660" y="328" text-anchor="middle" fill="#8b92a8" font-size="10" font-family="ui-monospace">CEFR-SP / meets_a1_criteria (+ FK/Fog/Spache descriptive)</text>
 
           <line x1="660" y1="342" x2="660" y2="365" stroke="#6c9eff" stroke-width="2" marker-end="url(#arrow)"/>
 
@@ -965,10 +966,12 @@
         <div class="limit-item">
           <div class="limit-icon">🎯</div>
           <div>
-            <h4>Proxy vs. pass criteria</h4>
+            <h4>KVL vs. A1 gate</h4>
             <p>
               KVL GLMM scores measure estimated learner <em>receptive</em> knowledge, not whether
-              output meets A1 readability thresholds (FK ≤ 5, Fog ≤ 6, Spache ≤ 4). Optimizing KVL
+              output meets the primary CEFR-SP document-level A1 gate
+              (<code>meets_a1_criteria</code> when <code>cefr_sp_level == "A1"</code>;
+              FK / Fog / Spache remain descriptive only). Optimizing KVL
               during decode may not monotonically improve <code>meets_a1_criteria</code> — empirical
               comparison against best-of-N and guided decoding is required.
             </p>

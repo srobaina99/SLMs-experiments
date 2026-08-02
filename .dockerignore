@@ -1,0 +1,28 @@
+# Keep the eval-image build context small (context = repo root).
+
+.git/
+.github/
+.cursor/
+.venv/
+venv/
+**/__pycache__/
+**/*.py[cod]
+**/*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.DS_Store
+
+# Large / irrelevant for the eval image
+results/
+models/gguf/
+models/
+thoughts/
+*.ckpt
+data/cefr_sp/*.ckpt
+data/cefr_sp/*.ckpt.partial
+
+# Local IDE / scratch
+eval-stack-final-state.html
+.wayfinder_map_body.md
+agent-transcripts/
