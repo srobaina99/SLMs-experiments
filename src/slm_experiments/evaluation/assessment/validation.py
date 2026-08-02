@@ -836,6 +836,9 @@ def build_validation_section(
         "cefr_tsar_ensemble_ordinal",
         "cefr_tsar_status",
     ]
+    # Older bundles may omit cefr_sp_level on item_map; scores.csv still carries it.
+    if "cefr_sp_level" not in base.columns:
+        score_cols.insert(1, "cefr_sp_level")
     if not scores.empty and "item_id" in scores.columns:
         sc = scores[[c for c in score_cols if c in scores.columns]].drop_duplicates(
             "item_id", keep="first"

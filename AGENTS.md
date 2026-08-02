@@ -47,7 +47,7 @@ SLMs-experiments/
 ├── README.md                 # Human quickstart
 ├── ExperimentDesign.md       # Formal experiment specification
 ├── scripts/clusteruy/        # SLURM batch scripts (smoke test + Phase 2 sweeps)
-├── requirements.txt          # Runtime dependencies (7 packages)
+├── requirements.txt          # Runtime dependencies (8 packages)
 ├── requirements-dev.txt      # pytest
 ├── pytest.ini
 ├── docs/                     # Detailed reference docs
@@ -139,7 +139,8 @@ CLI → Phase runner → Pipeline (generate → format → evaluate → record) 
 - `cli.py` dispatches only — no experiment logic
 - Phase runners (`phase1/runner.py`, `phase2/*.py`) orchestrate configs and call the pipeline
 - `core/pipeline.py` owns the generate→format→evaluate→record loop
-- `core/run_store.py` owns manifest, CSV, and summary writing
+- `core/run_store.py` owns generation-run manifest, CSV, and summary writing
+- Assessment writers (`evaluation/assessment/*`, `human/study_*`) own assessment-kind artifacts under the same `results/runs/{run_id}/` tree (items/scores/analysis/study/judge + kind-aware manifest patches); use `RunStore` for path/layout helpers and generation reads
 - Model wrappers extend `models/llamacpp.py` — one file per model in `models/wrappers/`
 
 ## 8. Models

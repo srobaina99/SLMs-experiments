@@ -213,17 +213,31 @@ def stratified_sample_with_weights(
         raise ValueError(f"sample size must be positive, got {n}")
     if df.empty:
         return df.copy()
-    if len(df) <= n:
-        out = df.copy()
-        out["inclusion_probability"] = 1.0
-        out["inclusion_weight"] = 1.0
-        return out.reset_index(drop=True)
 
     pool = inclusion_pool if inclusion_pool is not None else df
     pool_sizes = {
         name: int(len(group))
         for name, group in pool.groupby(stratum_col, sort=False)
     }
+
+    if len(df) <= n:
+        # Census of ``df``: still use unconditional π vs inclusion_pool.
+        out = df.copy()
+        drawn_sizes = {
+            name: int(len(group))
+            for name, group in out.groupby(stratum_col, sort=False)
+        }
+
+        def _census_p(stratum: Any) -> float:
+            pool_n = float(pool_sizes.get(stratum, 0))
+            count = float(drawn_sizes.get(stratum, 0))
+            return count / pool_n if pool_n > 0 else 0.0
+
+        out["inclusion_probability"] = out[stratum_col].map(_census_p)
+        out["inclusion_weight"] = out["inclusion_probability"].map(
+            lambda p: (1.0 / p) if p > 0 else float("inf")
+        )
+        return out.reset_index(drop=True)
 
     groups = list(df.groupby(stratum_col, sort=False))
     num_groups = len(groups)

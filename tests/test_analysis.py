@@ -600,11 +600,13 @@ class TestItemMapSchemaExtension:
     def test_item_map_carries_cefr_sp_ordinal_and_a1(self, tmp_path: Path):
         assess_id, store = _build_weights_assessment(tmp_path)
         item_map = store.read_item_map_csv(assess_id)
+        assert "cefr_sp_level" in item_map.columns
         assert "cefr_sp_level_ordinal" in item_map.columns
         assert "meets_a1_criteria" in item_map.columns
-        # Successful baseline rows should carry the forced ordinal.
+        # Successful baseline rows should carry the forced ordinal + band label.
         ok = item_map[item_map["generation_successful"] == True]  # noqa: E712
         assert ok["cefr_sp_level_ordinal"].notna().any()
+        assert ok["cefr_sp_level"].notna().any()
         assert ok["meets_a1_criteria"].notna().any()
 
 

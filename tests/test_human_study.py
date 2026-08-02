@@ -223,6 +223,26 @@ class TestStratifiedSample:
             # Conditional-on-remaining would have been n_drawn/8 — must differ.
             assert expected_p != pytest.approx(n_drawn / 8.0)
 
+    def test_census_weights_still_use_inclusion_pool(self):
+        """Taking all remaining items must not force π=1 against the original pool."""
+        pool = pd.DataFrame(
+            {
+                "stratum": ["a"] * 10 + ["b"] * 10,
+                "item_id": [f"i{i}" for i in range(20)],
+            }
+        )
+        remaining = pool.iloc[2:10].copy()  # 8 from a
+        remaining = pd.concat([remaining, pool.iloc[12:20]], ignore_index=True)  # +8 from b
+        assert len(remaining) == 16
+
+        sampled = stratified_sample_with_weights(
+            remaining, n=16, seed=42, inclusion_pool=pool
+        )
+        assert len(sampled) == 16
+        for stratum, group in sampled.groupby("stratum"):
+            assert group["inclusion_probability"].iloc[0] == pytest.approx(8 / 10.0)
+            assert group["inclusion_weight"].iloc[0] == pytest.approx(10 / 8.0)
+
     def test_disagreement_stratum_from_tsar_scores(self):
         from slm_experiments.human.study_export import build_item_frame
 

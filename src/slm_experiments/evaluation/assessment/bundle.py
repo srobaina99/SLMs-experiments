@@ -72,6 +72,7 @@ ITEM_MAP_COLUMNS = [
     "kvl_beam_width",
     "beam_width",
     # Carried from source full.csv so analysis reads bundle artifacts only.
+    "cefr_sp_level",
     "cefr_sp_level_ordinal",
     "meets_a1_criteria",
 ]
@@ -495,6 +496,7 @@ class AssessmentBundler:
                     "guided_top_k": row.get("guided_top_k", pd.NA),
                     "kvl_beam_width": row.get("kvl_beam_width", pd.NA),
                     "beam_width": row.get("beam_width", pd.NA),
+                    "cefr_sp_level": row.get("cefr_sp_level", pd.NA),
                     "cefr_sp_level_ordinal": row.get("cefr_sp_level_ordinal", pd.NA),
                     "meets_a1_criteria": meets_a1,
                 }
