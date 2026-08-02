@@ -1,0 +1,9 @@
+{
+  "overall": {
+    "count": 2,
+    "generation_successful_count": 2,
+    "generation_failure_rate": 0.0,
+    "a1_pass_rate": 1.0,
+    "hit_max_tokens_rate": 0.0
+  }
+}
