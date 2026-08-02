@@ -1,10 +1,74 @@
 # Experiment Design
 
-Formal specification for the SLM evaluation framework. Phase 1 establishes intervention effects via a factorial design; Phase 2 sweeps hyperparameters on all four models.
+Formal specification for the SLM evaluation framework. Phase 2 sweeps hyperparameters on all four models; Phase 1’s factorial design remains specified below for completeness.
+
+**Thesis scope:** Phase 2 only (`weights`, `prompting`, `guided`, `kvl_beam`). Phase 1 code remains for optional follow-up but is not run or cited for the master thesis. Formal claims use `--prompts all` (25 prompts); the CLI default `n=3` is a smoke-test guardrail only.
 
 ## Context
 
 This project evaluates whether inference-time interventions make small language models (SLMs) produce simpler English answers for beginner learners. Prompts are themed around CEFR A1 topics; the primary binary outcome is **CEFR-SP document level A1** (`meets_a1_criteria` when `cefr_sp_level == "A1"`). Four models are tested across interventions that aim to simplify vocabulary and sentence structure.
+
+The locked evaluation construct, endpoint hierarchy, statistics, baselines, and reporting rules are specified in [Evaluation Protocol (locked)](#evaluation-protocol-locked). Document that protocol **before inspecting any new assessment scores**.
+
+## Evaluation Protocol (locked)
+
+Locked assessment protocol (plan Decision 2 / Phase A). Copy semantics from `thoughts/plans/evaluation-stack-plan.md`; do not invent endpoints or margins when analyzing runs.
+
+### Construct
+
+> a correct, coherent English answer that a Spanish-L1 CEFR A1 learner can understand without help.
+
+Model outputs are English. CEFR difficulty is measured on the English answer; Spanish KVL measures L1 lexical familiarity. Complementary, not redundant.
+
+### Endpoint hierarchy
+
+| Role | Endpoint | Notes |
+|------|----------|-------|
+| **Primary** | CEFR-SP document-level A1 | Live `meets_a1_criteria` gate (`cefr_sp_level == "A1"`) |
+| **Guardrail** | Human answer-adequacy | **Human-rated subset only** |
+| **Secondary** | TSAR ModernBERT ensemble ordinal | Assessment-only directional cross-check; **never an A1 gate** |
+| **Secondary** | Spanish KVL v2 | Learner-L1 vocabulary difficulty |
+| **Legacy / descriptive** | FK / Fog / Spache | Recorded for analysis; do not gate A1 |
+
+Every endpoint is **always reported beside** `generation_failure_rate` and `hit_max_tokens_rate` — **never conditional-only**.
+
+### Primary statistic
+
+- The beneficial-intervention comparison uses the **paired CEFR-SP mean-ordinal delta** vs baseline, in the **difficulty-decreasing (easier) direction**.
+- The **binary A1 pass-rate change** is reported alongside as the **construct-level headline**.
+- The **TSAR ensemble ordinal delta** is reported the same way but only as a **secondary** directional cross-check.
+
+### Baseline
+
+**In-run neutral / identity point of each sweep**, paired by `(model, prompt_id)`, with identical decoding otherwise:
+
+| Sweep | Neutral / identity point |
+|-------|--------------------------|
+| `weights` | weight factor `1.0` (no logit bias) |
+| `prompting` | zero-shot |
+| `guided` | unconstrained greedy (`guided_top_k=0` / plain greedy) |
+| `kvl_beam` | width `1` / plain greedy |
+
+Where a grid lacks its neutral point, **add it** so every run carries its own baseline.
+
+### Adequacy non-inferiority (human subset)
+
+Margin = **0.5** on the 1–4 adequacy scale, **human subset only**. Adequacy is "preserved" iff the paired drop (baseline − intervention) in mean consensus adequacy has a bootstrap CI whose **upper bound stays below 0.5**.
+
+### Bootstrap
+
+- **Percentile** bootstrap, **95% two-sided**, **10,000** resamples over paired `prompt_id`s within each model (the pairing unit).
+- **Fixed seed** recorded in the assessment manifest.
+- Same machinery for the ordinal delta and the adequacy-drop check.
+- A **descriptive** "CI excludes 0" flag may mark easier-direction shifts (and the < 0.5 adequacy check). Use **no confirmatory** significance language.
+
+### Multiplicity
+
+**No multiplicity correction.** Report **raw 95% CIs**. Frame all sweeps (`weights`, `prompting`, `guided`, `kvl_beam`) as **exploratory / descriptive** — observed trends, not confirmatory significance claims. (This supersedes any earlier within-family FDR proposal.)
+
+### Quality-preservation scope
+
+Quality-preservation claims stay **limited to the human sample** until judge results are **imported** via the provider-neutral LLM-judge seam (`assess judge-export` / `assess judge-import`) and shown to agree acceptably with human consensus. The seam ships `judge_input.jsonl`, a versioned judge rubric aligned with the human study dimensions, and a strict `judge_scores_v0` schema — **no API / provider adapter**.
 
 ## Models
 
@@ -106,7 +170,7 @@ No weighting, no contextual prompting.
 
 SMOG is **not** used — short model outputs cannot satisfy its 30-sentence minimum.
 
-Treat `a1_pass_rate` / `a1_pass_count` in `summary.json` as CEFR-SP A1 pass rate / count. Human ratings (`human export` / `import`) assess agreement with this flag; they are not folded into the automatic gate. Metric means still exclude failed generations.
+Treat `a1_pass_rate` / `a1_pass_count` in `summary.json` as CEFR-SP A1 pass rate / count. Human ratings assess agreement with this flag; they are not folded into the automatic gate. Prefer the three-rater blinded study under an assessment bundle (`human study-export` / `study-import`; see [docs/human-eval.md](docs/human-eval.md)). The legacy single-rater `human export` / `import` remains for smoke tests only. Metric means still exclude failed generations.
 
 ## Phase 2 — Hyperparameter Sweeps
 
@@ -213,7 +277,7 @@ Every run produces a bundle in `results/runs/{run_id}/`:
 Reduced columns with European decimal format (`decimal=','`):
 
 - `model`, `config_weighting`, `config_prompting`, `prompt_id`
-- `answer`, `time_spent`, `generation_successful`, `meets_a1_criteria`
+- `answer`, `time_spent`, `generation_successful`, `hit_max_tokens`, `meets_a1_criteria`
 - `flesch_kincaid_grade`, `gunning_fog`, `spache_readability`
 - `word_count`, `difficult_words`
 
@@ -231,7 +295,7 @@ All fields including beam metadata (`beam_width`, `a1_ratio`, `candidates_genera
     "both": { "count": 84, "a1_pass_rate": 0.40, "flesch_kincaid_grade": { "mean": 2.8, ... } }
   },
   "by_weight_factor": {
-    "1.5": { "count": 100, "a1_pass_rate": 0.4, "generation_failure_rate": 0.02, "...": "..." }
+    "1.5": { "count": 100, "a1_pass_rate": 0.4, "generation_failure_rate": 0.02, "hit_max_tokens_rate": 0.08, "...": "..." }
   },
   "by_model": {
     "Qwen3": {
@@ -251,22 +315,43 @@ Pooled sections (`by_config`, `by_weight_factor`, …) remain as overview. **The
 
 Phase 1 runs populate `by_config` and `by_model[*].by_config`. Phase 2 sweeps add a sweep-specific section (`by_weight_factor`, `by_num_shots`, `by_guided_top_k`, `by_kvl_beam_width`) and nest the same keys under `by_model`. All Phase 2 weight runs share the same intervention flags, so pooled `by_config` collapses to a single bucket (typically `both`); use the sweep / `by_model` sections for analysis.
 
-Failed generations excluded from metric means; `generation_failure_rate` and proxy `a1_pass_rate` are computed over all rows.
+Failed generations excluded from metric means; `generation_failure_rate`, `hit_max_tokens_rate`, and `a1_pass_rate` are computed over all rows as denominator.
+ `hit_max_tokens` is true when decoding used the full `max_new_tokens` budget without a natural stop (llama.cpp `finish_reason=length` for greedy; decoder loop exhaustion for guided / KVL).
+
+**Thesis table cell recipe:** for every reported cell print `a1_pass_rate`, `generation_failure_rate`, `hit_max_tokens_rate`, then conditional means (readability / KVL as appropriate).
+
+### Assessment bundle (`kind: assessment`)
+
+Immutable post-hoc bundle at `results/runs/{YYYYMMDD_HHMMSS}_assessment_beginner_suitability/`, built with `assess build --source-run-ids …`. Never mutates source generation runs. Manifest sets `kind: "assessment"`.
+
+| Artifact | Contents |
+|----------|----------|
+| `items.csv` | Deduped scorable texts (`item_id`, `prompt_id`, `prompt`, `cleaned_response`, …) |
+| `item_map.csv` | Links each `item_id` back to source `experiment_id` / model / sweep keys; carries `cefr_sp_level_ordinal`, `meets_a1_criteria` |
+| `scores.csv` | Assessment scorers: `cefr_tsar_*` (ensemble ordinal / disagreement) + `kvl_v2_*` |
+| `summary.json` | Assessment aggregates |
+| `manifest.json` | `kind: assessment`, source run ids, scorer revisions, optional `analysis` / `human_study` blocks |
+| `analysis/` | Paired deltas + validation (auto after `assess build`; see Evaluation Protocol) |
+| `study/` | Three-rater blinded human study (after `human study-export`; see [docs/human-eval.md](docs/human-eval.md)) |
+| `judge/` | Provider-neutral LLM-judge seam (`judge_input.jsonl`, rubric, schema, optional `judge_scores.csv`) |
+
+TSAR columns are assessment-only directional cross-checks — **never** an A1 gate. Metric definitions: [docs/metrics.md](docs/metrics.md). Cluster eval image: [docs/clusteruy.md](docs/clusteruy.md).
 
 ### manifest.json
 
-Run metadata: phase, experiment type, CLI args, models, prompt count, timestamps, artifact paths.
+Run metadata: phase, experiment type, CLI args, models, prompt count, timestamps, artifact paths. Generation runs omit `kind` or use `kind: "generation"`; assessment bundles set `kind: "assessment"`.
 
 ## Statistical Analysis
 
-The factorial design enables:
+Formal endpoints, baselines, bootstrap, and multiplicity rules are locked in [Evaluation Protocol (locked)](#evaluation-protocol-locked). Do not treat the bullets below as an alternate analysis contract.
 
-- Grouping by intervention flags (`config_weighting`, `config_prompting`)
-- Model comparison across the same prompts
-- Factorial interaction analysis (additive vs synergistic effects)
+Operational groupings the run artifacts still support:
+
+- Grouping by intervention flags (`config_weighting`, `config_prompting`) and Phase 2 sweep keys
+- Within-model paired comparisons vs the in-run neutral point (`(model, prompt_id)`)
 - Boxplot and heatmap visualization via `plot --run-id`
 
-Phase 2 sweeps enable within-model hyperparameter optimization curves.
+Phase 1 factorial interaction analysis remains available for optional follow-up but is out of thesis scope.
 
 ## Research Questions
 
@@ -278,7 +363,7 @@ Phase 2 sweeps enable within-model hyperparameter optimization curves.
 **Phase 2:**
 1. What is the optimal weight factor (per model) before fluency degrades under prompting + weighting?
 2. How many prompting shots are needed for consistent simplification?
-3. Does guided top-k or KVL beam width improve the readability proxy / KVL metrics vs the fixed carrier (per model)?
+3. Does guided top-k or KVL beam width improve CEFR-SP / KVL metrics vs the fixed carrier (per model)?
 4. (Excluded) Deprecated best-of-N beam — do not ask thesis questions of `phase2 beam` runs.
 
 ## Methodological Notes

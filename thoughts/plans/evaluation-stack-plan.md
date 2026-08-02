@@ -126,13 +126,13 @@ Building the image is implementation (out of this planning effort's scope); the 
 
 ## Decision 4 — Three-rater human study + approved rubric
 
-Locked by [VALIDATE + draft: three-rater human study](https://github.com/srobaina99/SLMs-experiments/issues/9). Asset: `thoughts/plans/human-study-rubric-draft-v0.md`.
+Locked by [VALIDATE + draft: three-rater human study](https://github.com/srobaina99/SLMs-experiments/issues/9). Asset: `thoughts/plans/human-study-rubric-draft-v0.md`. Shipped by [#16](https://github.com/srobaina99/SLMs-experiments/issues/16); reliability approach reconciled in the cross-doc ticket (#21).
 
 - **Replace the single-rater round trip.** The current `human export/import` is not blind (leaks model/config), omits prompt text, rates the raw `response`, and mutates the source `full.csv`. Build **study-level long-format** modules (`study_export` / `study_import` / `reliability.py`), not an in-place patch; avoid the reserved `import` name.
 - **Blind sheet:** `item_id`, `prompt`, `answer` (= `cleaned_response`) only — never `model` / `config` / `experiment_id` / CEFR / KVL. The private source key stays in the study bundle; **never write back to generation runs**.
-- **Sample:** default analysis **n = 100** unique items after an **excluded calibration pilot**; stratify on assessment `item_map` axes (family, model, baseline/intervention, CEFR band/disagreement, truncation) with inclusion weights.
+- **Sample:** default analysis **n = 100** unique items after an **excluded calibration pilot**; stratify on assessment `item_map` axes (family, model, baseline/intervention, CEFR band/disagreement, truncation) with inclusion weights. **Caveat (shipped):** weights are conditional on the post-calibration frame, not unconditional against the original pool.
 - **Ratings:** four ordinal **1–4** dimensions — overall suitability, vocabulary, syntax, answer adequacy — plus optional notes. One shared item set, per-rater randomized order, exactly one rating per `(item_id, rater_id)`.
-- **Reliability & consensus:** ordinal **Krippendorff's α** (per dimension) + consensus **medians**.
+- **Reliability & consensus (shipped):** mean pairwise **exact + adjacent (±1) percent agreement** per dimension + consensus **medians**. **Krippendorff's α was deliberately dropped** (no chance-corrected agreement coefficient). See `human/reliability.py` and `docs/human-eval.md`.
 - **Rubric `beginner_suitability_rubric_v0` (approved).** Spanish anchors (human-edited), English column keys retained. **Binary human-suitable** iff median overall ≥ 3 **and** median adequacy ≥ 3 (vocab/syntax diagnostic only). Bump `rubric_version` on future edits.
 
 ---
@@ -142,7 +142,7 @@ Locked by [VALIDATE + draft: three-rater human study](https://github.com/srobain
 1. A new immutable **assessment bundle** at `results/runs/{timestamp}_assessment_beginner_suitability/` links ≥ 1 source run without mutating source `full.csv`.
 2. **TSAR ensemble** ordinal scores (`cefr_tsar_*`) produced in-process behind the eval extra by the pinned three-model ensemble (confidence-max), with explicit missing/error states, plus a CEFR-SP ↔ TSAR disagreement flag. (CEFR-SP itself already scores in-pipeline.)
 3. Versioned **occurrence-level lemmatized KVL v2** metrics alongside preserved v1 fields.
-4. **Three-rater** blinded long-format human study with ordinal Krippendorff's α, consensus medians, and the fixed rubric.
+4. **Three-rater** blinded long-format human study with exact + adjacent (±1) percent-agreement reliability (no Krippendorff's α), consensus medians, and the fixed rubric.
 5. Provider-neutral **judge seam** (`judge_input.jsonl`, rubric, schema, `judge_scores.csv` importer) — **no API adapter**.
 6. Paired per-`(model, prompt_id)` CEFR-SP / TSAR / KVL deltas with percentile bootstrap CIs; validation of CEFR-SP (and future judge) vs weighted human consensus.
 7. Reconciled methodological contract across `ExperimentDesign.md`, `docs/metrics.md`, `docs/cites-to-include.md`, `AGENTS.md`, new `docs/human-eval.md` (see the *Cross-doc reconciliation* appendix).
@@ -209,7 +209,7 @@ Validated against live `core/run_store.py` / `cli.py` by [VALIDATE: assessment b
 - **C1/C2 honored:** ordinal/direction only; SHAs + confidence-max pinned; `TRAIN_DOC_EN` single-model is the only A1-signal fallback.
 
 **KVL v2 (`kvl-v2`, kept from prior scoping):**
-- In `evaluation/kvl.py` + `evaluation/metrics.py`, add a **versioned occurrence-level** path using POS-aware **lemmatized content-word tokens** (all occurrences, not the unique surface-form set). Spanish lemmatizer lives in the eval extra.
+- In `evaluation/kvl.py` + `evaluation/metrics.py`, add a **versioned occurrence-level** path using POS-aware **lemmatized English content-word tokens** (all occurrences, not the unique surface-form set), looked up in the **Spanish-L1** KVL table by default. (`[kvl-v2]` is an empty install marker; NLTK WordNet is a core dep — not a Spanish lemmatizer.)
 - Report: token lookup **coverage**, **mean** score, **hard-token share**, and a **lower-tail** score (e.g. 10th percentile). **Never interpret a mean without coverage.**
 - **Preserve** all v1 KVL fields for old-run compatibility. **Do not** touch KVL beam decoding.
 
@@ -217,7 +217,7 @@ Validated against live `core/run_store.py` / `cli.py` by [VALIDATE: assessment b
 
 ### Phase D — Three-rater human study (`human-study`)
 
-Implement Decision 4: `study_export` / `study_import` / `reliability.py` + the versioned rubric file; blind long-format sheets; private source key in the study bundle; validation of one rating per `(item_id, rater_id)`; ordinal Krippendorff's α + consensus medians; binary human-suitable from median overall + adequacy. Leave the legacy single-rater `human export/import` in place for smoke tests until explicitly retired.
+Implement Decision 4: `study_export` / `study_import` / `reliability.py` + the versioned rubric file; blind long-format sheets; private source key in the study bundle; validation of one rating per `(item_id, rater_id)`; **exact + adjacent (±1) percent agreement** per dimension + consensus medians (**no Krippendorff's α** — dropped by design in #16); binary human-suitable from median overall + adequacy. Leave the legacy single-rater `human export/import` in place for smoke tests until explicitly retired.
 
 **Files:** `src/slm_experiments/human/study_export.py`, `study_import.py`, `reliability.py`, rubric file, `cli.py`, tests.
 
@@ -250,7 +250,7 @@ Provider-neutral `judge_input.jsonl`, a versioned rubric matching the human dime
 - new tests per phase
 
 ### Modified
-- `pyproject.toml` (eval extras: TSAR + Spanish lemmatizer)
+- `pyproject.toml` (optional extras: `[cefr-sp]`, `[cefr-tsar]`; empty `[kvl-v2]` marker)
 - `src/slm_experiments/cli.py` (dispatch: `assess`, study commands)
 - `src/slm_experiments/core/run_store.py` (bundle helpers, `kind` branching in `list_runs` / `runs show`)
 - `src/slm_experiments/evaluation/kvl.py`, `metrics.py` (KVL v2 path)
@@ -266,7 +266,9 @@ Provider-neutral `judge_input.jsonl`, a versioned rubric matching the human dime
 
 ## Cross-doc reconciliation (comprehensive)
 
-The four sibling docs are **already largely correct** on the CEFR-SP framing; the drift below is what the plan commits to fixing (planning-only — no edits made this effort). Enumerated line-references are as of the audit.
+**Status:** executed in [#21](https://github.com/srobaina99/SLMs-experiments/issues/21). The four sibling docs plus new `docs/human-eval.md` and the Decision 4 / rubric-draft reliability wording were reconciled to shipped code. Line numbers below were as of the pre-implementation audit and may no longer match.
+
+The four sibling docs were **already largely correct** on the CEFR-SP framing; the drift below is what the plan committed to fixing. Enumerated line-references are as of the audit.
 
 ### `ExperimentDesign.md` — mostly correct; minor drift + future additions
 - **`README`-level framing correct:** line 9 (primary = CEFR-SP A1) and lines 103–111 (A1 gate = CEFR-SP; FK/Fog/Spache descriptive; SMOG excluded) need **no change**.
@@ -294,12 +296,15 @@ The four sibling docs are **already largely correct** on the CEFR-SP framing; th
 
 ## Open at build time (only what genuinely remains)
 
-Everything substantive is locked by the map. Left to resolve at implementation:
+Everything substantive is locked by the map. Left to resolve at implementation / ops time:
 
 1. **Confirm the regenerated Phase 2 pool is healthy** (valid, non-truncated) before running real assessment numbers.
 2. **Recruit three real raters**; until then, validation runs on placeholder ratings.
-3. **Spanish lemmatizer choice** for KVL v2 (lightweight default → goes in the eval extra).
-4. **Eval extra name** — extend `[cefr-sp]` vs add sibling `[cefr-tsar]` (cosmetic; either keeps `requirements.txt` torch-free).
+
+Resolved during shipping (recorded so the open list is not re-litigated):
+
+3. **Lemmatizer for KVL v2:** English POS-aware `nltk.WordNetLemmatizer` (core dep) looking up the Spanish-L1 KVL table — not a Spanish lemmatizer; `[kvl-v2]` is an empty marker.
+4. **Eval extras:** sibling `[cefr-tsar]` (torch + transformers≥4.55) alongside `[cefr-sp]`; `requirements.txt` stays torch-free.
 
 ---
 
