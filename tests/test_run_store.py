@@ -176,6 +176,7 @@ class TestRunStore:
 
         manifest = json.loads((out_dir / "manifest.json").read_text())
         assert manifest["run_id"] == run_id
+        assert manifest["kind"] == "generation"
         assert manifest["phase"] == 1
         assert manifest["experiment"] == "factorial"
         assert manifest["observations"]["total"] == 2
@@ -267,6 +268,7 @@ class TestRunStore:
         assert summary["by_config"]["prompting_only"]["generation_failure_rate"] == 0.0
         assert summary["by_config"]["weighting_only"]["generation_successful_count"] == 0
         assert summary["by_config"]["weighting_only"]["generation_failure_rate"] == 1.0
+        assert summary["metadata"]["generation_failure_rate"] == 0.5
 
     def test_summary_excludes_failed_from_metric_means(self, tmp_path: Path):
         results = _make_results()

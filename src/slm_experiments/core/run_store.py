@@ -52,6 +52,9 @@ SWEEP_SUMMARY_SECTIONS = {
     "guided": ("by_guided_top_k", "guided_top_k"),
 }
 
+KIND_GENERATION = "generation"
+KIND_ASSESSMENT = "assessment"
+
 
 def _format_sweep_key(column: str, value: Any) -> str:
     if column in ("beam_width", "kvl_beam_width", "num_shots", "guided_top_k"):
@@ -250,6 +253,11 @@ def compute_summary_stats(
         "total_experiments": len(results),
         "successful_experiments": int(successful_df.shape[0]),
         "failed_experiments": int(len(results) - successful_df.shape[0]),
+        "generation_failure_rate": float(
+            1 - successful_df.shape[0] / len(results)
+        )
+        if results
+        else 0.0,
         "unique_prompts": int(df["prompt"].nunique()),
         "configs_tested": int(df["config_name"].nunique()),
     }
@@ -298,6 +306,7 @@ class RunStore:
         failed = len(results) - successful
 
         manifest = {
+            "kind": KIND_GENERATION,
             "run_id": run_id,
             "phase": phase,
             "experiment": experiment,
@@ -352,7 +361,11 @@ class RunStore:
         pd.DataFrame([r.to_dict() for r in results]).to_csv(path, index=False)
 
     def list_runs(self) -> List[Dict[str, Any]]:
-        """Return manifests for all run bundles, newest first."""
+        """Return manifests for all run bundles, newest first.
+
+        Bundles without an explicit ``kind`` are treated as generation runs
+        (legacy manifests written before the assessment discriminator).
+        """
         runs_dir = self.results_root / "runs"
         if not runs_dir.exists():
             return []
@@ -363,18 +376,43 @@ class RunStore:
                 continue
             manifest_path = run_path / "manifest.json"
             if manifest_path.exists():
-                manifests.append(json.loads(manifest_path.read_text(encoding="utf-8")))
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                manifest.setdefault("kind", KIND_GENERATION)
+                manifests.append(manifest)
 
         manifests.sort(key=lambda m: m.get("started_at", ""), reverse=True)
         return manifests
 
+    def bundle_kind(self, run_id: str) -> str:
+        """Return the bundle kind (``generation`` or ``assessment``)."""
+        return self.read_manifest(run_id).get("kind", KIND_GENERATION)
+
+    def is_assessment(self, run_id: str) -> bool:
+        return self.bundle_kind(run_id) == KIND_ASSESSMENT
+
     def read_manifest(self, run_id: str) -> Dict[str, Any]:
         manifest_path = self.run_dir(run_id) / "manifest.json"
-        return json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest.setdefault("kind", KIND_GENERATION)
+        return manifest
 
     def read_summary(self, run_id: str) -> Dict[str, Any]:
         summary_path = self.run_dir(run_id) / "summary.json"
         return json.loads(summary_path.read_text(encoding="utf-8"))
+
+    def read_items_csv(self, run_id: str) -> pd.DataFrame:
+        """Load items.csv from an assessment bundle."""
+        path = self.run_dir(run_id) / "items.csv"
+        if not path.exists():
+            raise FileNotFoundError(f"items.csv not found for run: {run_id}")
+        return pd.read_csv(path)
+
+    def read_item_map_csv(self, run_id: str) -> pd.DataFrame:
+        """Load item_map.csv from an assessment bundle."""
+        path = self.run_dir(run_id) / "item_map.csv"
+        if not path.exists():
+            raise FileNotFoundError(f"item_map.csv not found for run: {run_id}")
+        return pd.read_csv(path)
 
     def read_full_csv(self, run_id: str) -> pd.DataFrame:
         """Load full.csv from a run bundle."""
