@@ -18,6 +18,15 @@ cefr-sp = [
     "transformers>=4.36.0",
     "pytorch-lightning>=2.0.0,<3",
 ]
+# Assessment-only TSAR ModernBERT ensemble (ordinal / disagreement cross-check; never an A1 gate).
+# transformers>=4.55 required for ModernBERT; torch shared with [cefr-sp].
+cefr-tsar = [
+    "torch>=2.0.0",
+    "transformers>=4.55.0",
+]
+# KVL v2 uses POS-aware NLTK WordNetLemmatizer (nltk is a core dep in
+# requirements.txt). No extra packages required; marker kept for install docs.
+kvl-v2 = []
 dev = ["pytest>=7.0"]
 
 [tool.setuptools.dynamic]
@@ -25,6 +34,9 @@ dependencies = { file = ["requirements.txt"] }
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"slm_experiments.human" = ["rubrics/*.md"]
 
 [project.scripts]
 slm_experiments = "slm_experiments.cli:main"
