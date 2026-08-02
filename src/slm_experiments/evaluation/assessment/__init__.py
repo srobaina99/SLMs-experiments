@@ -1,6 +1,11 @@
 """Immutable assessment bundles and scoring seam."""
 
 from slm_experiments.evaluation.assessment.bundle import AssessmentBundler
+from slm_experiments.evaluation.assessment.judge import (
+    JudgeExporter,
+    JudgeImporter,
+    validate_judge_scores,
+)
 from slm_experiments.evaluation.assessment.scorers import (
     list_scorers,
     register_scorer,
@@ -13,7 +18,10 @@ from slm_experiments.evaluation.assessment import kvl_v2 as _kvl_v2  # noqa: F40
 
 __all__ = [
     "AssessmentBundler",
+    "JudgeExporter",
+    "JudgeImporter",
     "list_scorers",
     "register_scorer",
     "score_items",
+    "validate_judge_scores",
 ]
