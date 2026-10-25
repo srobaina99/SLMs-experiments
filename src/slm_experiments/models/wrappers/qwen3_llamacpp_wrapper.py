@@ -53,8 +53,10 @@ class Qwen3LlamaCppWrapper(LlamaCppBaseWrapper):
         template = self._get_chat_template()
         if template is None or not JINJA_FORMATTER_AVAILABLE:
             return None
+        # llama-cpp-python 0.3.16 accepts extra call kwargs but does not render
+        # them. Bind the hard switch in Jinja itself, without adding prompt text.
         self._jinja_formatter = Jinja2ChatFormatter(
-            template,
+            "{% set enable_thinking = false %}" + template,
             eos_token=self._EOS_TOKEN,
             bos_token=self._BOS_TOKEN,
             add_generation_prompt=True,
@@ -84,7 +86,6 @@ class Qwen3LlamaCppWrapper(LlamaCppBaseWrapper):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_input},
             ],
-            enable_thinking=False,
         )
         return response.prompt
 

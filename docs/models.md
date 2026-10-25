@@ -40,6 +40,12 @@ ChatML template: `<|im_start|>system/user/assistant` blocks.
 
 ChatML template (same as Qwen2).
 
+The wrapper binds `enable_thinking = false` inside the GGUF Jinja template before
+rendering. This preserves the no-thinking switch with `llama-cpp-python==0.3.16`,
+whose `Jinja2ChatFormatter` accepts extra call keywords but does not pass them into
+the template. When metadata or the formatter is unavailable, the manual ChatML
+fallback supplies the same empty `<think>...</think>` prefix.
+
 ### TinyLlama-1.1B-Chat
 
 | Spec | Value |
