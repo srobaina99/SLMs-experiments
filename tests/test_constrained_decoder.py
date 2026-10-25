@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from slm_experiments.models.a1_token_index import A1TokenIndex
-from slm_experiments.models.constrained_decoder import ConstrainedDecoder
+from slm_experiments.models.constrained_decoder import ConstrainedDecoder, _pool_candidates
 
 
 VOCAB_SIZE = 8
@@ -267,6 +267,65 @@ class TestConstrainedDecoderFlat:
         result_b = ConstrainedDecoder().decode(llm_b, **kwargs)
 
         assert result_a.token_ids == result_b.token_ids
+
+    def test_hit_max_tokens_when_budget_exhausted(self):
+        llm = StubLLM(
+            [
+                _logits_from_scores({3: 5.0}),
+                _logits_from_scores({2: 5.0}),
+            ]
+        )
+        result = ConstrainedDecoder().decode(
+            llm,
+            prompt_token_ids=[100],
+            max_tokens=2,
+            stop=[],
+            guided_pool_size=3,
+            index=_make_index(),
+            mode="flat",
+            temperature=0.0,
+            top_k=50,
+        )
+
+        assert len(result.token_ids) == 2
+        assert result.hit_max_tokens is True
+
+    def test_hit_max_tokens_false_on_stop_token(self):
+        tok_stop = 4
+        llm = StubLLM(
+            [
+                _logits_from_scores({tok_stop: 5.0, 3: 4.0, 1: 3.0}),
+            ]
+        )
+        llm.token_text[tok_stop] = ""
+        result = ConstrainedDecoder().decode(
+            llm,
+            prompt_token_ids=[100],
+            max_tokens=10,
+            stop=[],
+            stop_token_ids=frozenset({tok_stop}),
+            guided_pool_size=3,
+            index=_make_index(stop_token_ids=frozenset({tok_stop})),
+            mode="flat",
+            temperature=0.0,
+            top_k=50,
+        )
+
+        assert result.hit_max_tokens is False
+        assert result.steps_total < 10
+
+    def test_pool_size_zero_still_yields_one_token(self):
+        """guided_pool_size=0 is not a no-op empty pool.
+
+        _pool_candidates appends then checks len >= size, so size 0 yields the
+        single top token. Phase 2 must not send pool 0 through this decoder
+        (runner uses unconstrained pipeline.run instead).
+        """
+        logits = _logits_from_scores({4: 5.0, 1: 4.0, 3: 3.0})
+        pool = _pool_candidates(
+            logits, temperature=0.0, top_k=50, guided_pool_size=0
+        )
+        assert pool == [4]
 
 
 class TestConstrainedDecoderTrie:

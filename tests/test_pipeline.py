@@ -87,6 +87,68 @@ class MockBeamComplexModel:
         }
 
 
+class MockBeamFailureModel:
+    def generate_beam(self, prompt, config, beam_width=4, selection_method="a1_ratio"):
+        return {
+            "response": "",
+            "response_time_seconds": 0.2,
+            "generation_successful": False,
+            "beam_selection_method": selection_method,
+            "beam_a1_ratio": 0.0,
+            "beam_a1_count": 0,
+            "beam_content_word_count": 0,
+            "beam_cumulative_logprob": 0.0,
+            "beam_width": beam_width,
+        }
+
+
+class MockHitMaxModel:
+    def generate(self, prompt: str, config: ExperimentConfig) -> dict:
+        return {
+            "response": SIMPLE_RESPONSE,
+            "response_time_seconds": 1.0,
+            "generation_successful": True,
+            "hit_max_tokens": True,
+        }
+
+
+class MockThinkingOnlyModel:
+    """Qwen3-style thinking block with no leftover answer text."""
+
+    def generate(self, prompt: str, config: ExperimentConfig) -> dict:
+        return {
+            "response": "<think>internal chain of thought about friends</think>",
+            "response_time_seconds": 0.4,
+            "generation_successful": True,
+        }
+
+
+class MockThinkingThenAnswerModel:
+    def generate(self, prompt: str, config: ExperimentConfig) -> dict:
+        return {
+            "response": (
+                "<think>internal chain of thought</think>\n" + SIMPLE_RESPONSE
+            ),
+            "response_time_seconds": 0.4,
+            "generation_successful": True,
+        }
+
+
+class RecordingGenerateModel:
+    """Captures the config forwarded by pipeline.run (weights / prompting carriers)."""
+
+    def __init__(self):
+        self.seen_config = None
+
+    def generate(self, prompt: str, config: ExperimentConfig) -> dict:
+        self.seen_config = config
+        return {
+            "response": SIMPLE_RESPONSE,
+            "response_time_seconds": 1.0,
+            "generation_successful": True,
+        }
+
+
 class TestExperimentPipeline:
     def test_success_path(self):
         config = ExperimentConfig(model_name="Qwen3", prompt_id="p01")
@@ -189,3 +251,157 @@ class TestExperimentPipeline:
         assert result.generation_successful is True
         assert result.cefr_sp_level == "C1"
         assert result.meets_a1_criteria is False
+
+    def test_run_forwards_weighting_and_prompting_config(self):
+        """Phase 2 weights sweep carrier: weighting ON + prompting ON."""
+        config = ExperimentConfig(
+            model_name="Qwen3",
+            prompt_id="p07",
+            config_weighting=True,
+            config_prompting=True,
+            weight_factor=2.0,
+            num_shots=0,
+        )
+        model = RecordingGenerateModel()
+        result = ExperimentPipeline().run("What is a friend?", config, model)
+
+        assert model.seen_config is config
+        assert model.seen_config.config_weighting is True
+        assert model.seen_config.config_prompting is True
+        assert model.seen_config.weight_factor == 2.0
+        assert result.config_weighting is True
+        assert result.config_prompting is True
+        assert result.weight_factor == 2.0
+        assert result.generation_successful is True
+
+    def test_run_forwards_prompting_only_config(self):
+        """Phase 2 prompting / guided-baseline / kvl-baseline carrier."""
+        config = ExperimentConfig(
+            model_name="Qwen3",
+            prompt_id="p08",
+            config_weighting=False,
+            config_prompting=True,
+            weight_factor=1.0,
+            num_shots=3,
+        )
+        model = RecordingGenerateModel()
+        result = ExperimentPipeline().run("What is a friend?", config, model)
+
+        assert model.seen_config.config_weighting is False
+        assert model.seen_config.config_prompting is True
+        assert model.seen_config.num_shots == 3
+        assert result.config_weighting is False
+        assert result.config_prompting is True
+        assert result.num_shots == 3
+        assert result.generation_successful is True
+
+    def test_failure_still_has_result_fields(self):
+        config = ExperimentConfig(model_name="Qwen3", prompt_id="p09")
+        result = ExperimentPipeline().run(
+            "What is a friend?", config, MockFailureModel()
+        )
+
+        assert isinstance(result, ExperimentResult)
+        assert result.generation_successful is False
+        assert result.meets_a1_criteria is False
+        assert result.prompt == "What is a friend?"
+        assert result.response == ""
+        assert result.word_count == 0
+        assert result.kvl_mean_score is None
+        assert result.kvl_content_word_count == 0
+        assert result.cefr_sp_level is None
+        assert result.flesch_kincaid_grade == 0.0
+
+    def test_hit_max_tokens_recorded_on_success(self):
+        config = ExperimentConfig(model_name="Qwen3", prompt_id="p10")
+        result = ExperimentPipeline().run(
+            "What is a friend?", config, MockHitMaxModel()
+        )
+
+        assert result.generation_successful is True
+        assert result.hit_max_tokens is True
+
+    def test_hit_max_tokens_defaults_false(self):
+        config = ExperimentConfig(model_name="Qwen3", prompt_id="p11")
+        result = ExperimentPipeline().run(
+            "What is a friend?", config, MockSuccessModel()
+        )
+
+        assert result.hit_max_tokens is False
+
+    def test_thinking_tags_only_treated_as_failure(self):
+        """Formatter strips Qwen3 <think> blocks; leftover empty text is a failure."""
+        config = ExperimentConfig(model_name="Qwen3", prompt_id="p12")
+        result = ExperimentPipeline().run(
+            "What is a friend?", config, MockThinkingOnlyModel()
+        )
+
+        assert result.generation_successful is False
+        assert result.meets_a1_criteria is False
+        assert result.cleaned_response == ""
+        assert result.word_count == 0
+
+    def test_thinking_tags_stripped_before_evaluation(self):
+        config = ExperimentConfig(model_name="Qwen3", prompt_id="p13")
+        result = ExperimentPipeline().run(
+            "What is a friend?", config, MockThinkingThenAnswerModel()
+        )
+
+        assert result.generation_successful is True
+        assert "<think>" not in result.cleaned_response
+        assert "</think>" not in result.cleaned_response
+        assert "internal chain of thought" not in result.cleaned_response
+        assert "friend" in result.cleaned_response.lower()
+
+    def test_meets_a1_criteria_false_when_cefr_sp_disabled(self):
+        config = ExperimentConfig(
+            model_name="Qwen3", prompt_id="p14", enable_cefr_sp=False
+        )
+        result = ExperimentPipeline().run(
+            "What is a friend?", config, MockSuccessModel()
+        )
+
+        assert result.generation_successful is True
+        assert result.cefr_sp_enabled is False
+        assert result.cefr_sp_level is None
+        assert result.meets_a1_criteria is False
+
+    def test_run_beam_failure_records_metadata(self):
+        """Deprecated beam path still evaluates internally (CLI hard-fails separately)."""
+        config = ExperimentConfig(model_name="Qwen3", prompt_id="p15")
+        result = ExperimentPipeline().run_beam(
+            "What is a friend?", config, MockBeamFailureModel(), beam_width=8
+        )
+
+        assert result.generation_successful is False
+        assert result.meets_a1_criteria is False
+        assert result.beam_width == 8
+        assert result.beam_selection_method == "a1_ratio"
+        assert result.word_count == 0
+        assert result.kvl_mean_score is None
+
+    def test_run_beam_records_hit_max_tokens(self):
+        class HitMaxBeam:
+            def generate_beam(
+                self, prompt, config, beam_width=4, selection_method="a1_ratio"
+            ):
+                return {
+                    "response": SIMPLE_RESPONSE,
+                    "response_time_seconds": 1.0,
+                    "generation_successful": True,
+                    "beam_selection_method": selection_method,
+                    "beam_a1_ratio": 0.75,
+                    "beam_a1_count": 3,
+                    "beam_content_word_count": 6,
+                    "beam_cumulative_logprob": -1.2,
+                    "beam_width": beam_width,
+                    "hit_max_tokens": True,
+                }
+
+        config = ExperimentConfig(model_name="Qwen3", prompt_id="p16")
+        result = ExperimentPipeline().run_beam(
+            "What is a friend?", config, HitMaxBeam(), beam_width=4
+        )
+
+        assert result.generation_successful is True
+        assert result.hit_max_tokens is True

@@ -1,9 +1,11 @@
 # ============================================================
 # slm-thesis-eval — assessment image (torch + transformers + TSAR pins)
 #
-# Separate from the lean generation image (thesis repo Dockerfile), which
-# stays torch-free and ships llama-cpp-python for P100. This image does NOT
-# install llama-cpp-python.
+# Separate from the generation image (`scripts/clusteruy/Dockerfile`), which
+# ships llama-cpp-python for P100 plus CEFR-SP runtime (torch + Lightning +
+# bert-base-cased). This image does NOT install llama-cpp-python and does
+# NOT prefetch bert-base-cased. ``assess build`` joins CEFR-SP labels from
+# the source run full.csv; it does not re-score.
 #
 # Build (from repo root):
 #   ./scripts/clusteruy/build_eval_image.sh
@@ -15,8 +17,7 @@
 # CEFR-SP .ckpt (~1.2 GB): NOT baked in (absent from git; do not download at
 # build). Bind-mount at run time if needed, e.g.:
 #   -v /path/to/level_estimator.ckpt:/workspace/data/cefr_sp/level_estimator.ckpt:ro
-# ``assess build`` joins cefr_sp_level from the source run's full.csv and does
-# not re-score CEFR-SP, so the ckpt is optional for the assess smoke path.
+# Optional for ``assess`` — labels are joined from the source run full.csv.
 #
 # P100-safe: torch pinned to cu121 wheels that include sm_60; code path never
 # uses flash_attention_2 (sm_60 → eager; else sdpa).

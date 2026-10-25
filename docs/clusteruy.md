@@ -5,8 +5,8 @@ Phase 2 experiments for this repo.
 
 **Official docs:** https://www.cluster.uy/ayuda/
 
-**Dockerfile location (generation, lean):** `../SLMs-master-thesis/Tesis/Codigo/scripts/clusteruy/Dockerfile`
-**Dockerfile location (assessment, eval):** `scripts/clusteruy/Dockerfile.eval` (this repo)
+**Dockerfile location (generation):** `scripts/clusteruy/Dockerfile` (this repo; llama-cpp + CEFR-SP runtime)
+**Dockerfile location (assessment, eval):** `scripts/clusteruy/Dockerfile.eval` (this repo; TSAR ModernBERT, no llama-cpp)
 
 ---
 
@@ -22,7 +22,8 @@ CONTEXT
 - GPU: Tesla P100 (sm_60). Phi-3 needs GPU; other models run on CPU inside the container.
 - Login node is for file management and job submission ONLY. Never run experiments there.
   Always use sbatch (batch) or interactivo -gpun (short smoke test).
-- Package install: use PYTHONPATH=/workspace/src (pip install -e . fails in the lean image).
+- Package install: use PYTHONPATH=/workspace/src (pip install -e . fails in the image).
+- CEFR-SP scores during generation. Host must have data/cefr_sp/level_estimator.ckpt (or $CEFR_SP_CKPT).
 
 CONNECTION
   ssh santiago.robaina@login.cluster.uy
@@ -35,17 +36,22 @@ VERIFY YOU ARE ON THE CLUSTER:
   squeue -u $USER   # your job queue
 
 EXPECTED HOME LAYOUT (may already exist from prior work):
-  ~/slm-thesis.sif                              # Singularity image (~1.5 GB lean generation)
-  ~/slm-thesis-eval.sif                         # Assessment image (torch + TSAR pins; heavier)
+  ~/slm-thesis.sif                              # Generation image (llama-cpp + CEFR-SP runtime; no TSAR)
+  ~/slm-thesis-eval.sif                         # Assessment image (torch + TSAR ModernBERT pins; no llama-cpp)
   ~/SLMs-experiments/                           # this repo
+  ~/SLMs-experiments/data/cefr_sp/level_estimator.ckpt  # required for Phase 2 gen (bind-mounted)
   ~/SLMs-master-thesis/Tesis/Codigo/models/gguf/  # GGUF models (~3.7 GB)
 
 PHASE 2 COMMANDS (inside Singularity on a compute node):
   export SLM_GGUF_DIR="$HOME/SLMs-master-thesis/Tesis/Codigo/models/gguf"
   cd ~/SLMs-experiments
 
-  singularity exec --nv --bind $(pwd):/workspace ~/slm-thesis.sif \
-    bash -c 'export PYTHONPATH=/workspace/src && cd /workspace && \
+  singularity exec --nv --bind $(pwd):/workspace \
+    --bind $HOME/SLMs-experiments/data/cefr_sp/level_estimator.ckpt:/workspace/data/cefr_sp/level_estimator.ckpt:ro \
+    ~/slm-thesis.sif \
+    bash -c 'export PYTHONPATH=/workspace/src TRANSFORMERS_OFFLINE=1 HF_HUB_OFFLINE=1 \
+      HF_HOME=/opt/hf_home NLTK_DATA=/usr/share/nltk_data \
+      CEFR_SP_CKPT=/workspace/data/cefr_sp/level_estimator.ckpt && cd /workspace && \
       python -m slm_experiments phase2 weights --prompts all --no-plot'
 
 SBATCH SCRIPTS (submit from login node):
@@ -53,9 +59,9 @@ SBATCH SCRIPTS (submit from login node):
   sbatch scripts/clusteruy/smoke_test.sh
   sbatch scripts/clusteruy/run_phase2_weights.sh
   sbatch scripts/clusteruy/run_phase2_prompting.sh
+  sbatch scripts/clusteruy/run_phase2_guided.sh
   sbatch scripts/clusteruy/run_phase2_kvl_beam.sh
   # run_phase2_beam.sh is deprecated (hard-fails) — use kvl_beam or guided
-  # guided: python -m slm_experiments phase2 guided --prompts all --no-plot
 
 DOWNLOAD RESULTS (from user's local machine, port 10022):
   rsync -avz -e "ssh -p 10022" \
@@ -121,35 +127,89 @@ ClusterUY runs **CentOS 7** — too old for modern Python/CUDA wheels. The worka
 
 There is no `docker` command on ClusterUY. Never instruct the agent to run `docker` on the cluster.
 
-### Build image locally (one-time or when deps change)
+### Build generation image locally (when llama-cpp or CEFR-SP runtime deps change)
+
+Build context is **this repo** (`SLMs-experiments`), not the frozen thesis tree.
 
 ```bash
-cd ../SLMs-master-thesis/Tesis/Codigo
+cd /path/to/SLMs-experiments
 docker login
-docker build --platform=linux/amd64 -t srobaina99/slm-thesis:latest scripts/clusteruy/
+./scripts/clusteruy/build_gen_image.sh
+# equivalent:
+# docker build --platform=linux/amd64 \
+#   -f scripts/clusteruy/Dockerfile \
+#   -t srobaina99/slm-thesis:latest .
 docker push srobaina99/slm-thesis:latest
 ```
 
-The Dockerfile compiles `llama-cpp-python` for P100 (`sm_60`). Prebuilt CUDA wheels
-target `sm_70+` and crash on ClusterUY. The lean image is ~1.5 GB as a `.sif` file.
+The Dockerfile compiles `llama-cpp-python==0.3.16` for P100 (`sm_60`) and installs CEFR-SP runtime
+(`torch==2.4.1+cu121`, `transformers==4.55.4`, `pytorch-lightning==2.4.0`) plus baked
+`bert-base-cased`. Build the backend from source for `sm_60` rather than assuming
+prebuilt CUDA llama-cpp wheels cover P100.
+The ~1.2 GB CEFR-SP **checkpoint is not baked** — bind-mount it at run time (see below).
+TSAR ModernBERT revisions stay in the eval image only. Do not install flash-attn.
 
-### Pull Singularity image on cluster
+The backend pin keeps the bundled llama.cpp revision stable. Its
+[CUDA CMake configuration](https://github.com/ggml-org/llama.cpp/blob/4227c9be4268ac844921b90f31595f81236bd317/ggml/src/ggml-cuda/CMakeLists.txt)
+explicitly retains P100 architecture 60, and the
+[release installation instructions](https://github.com/abetlen/llama-cpp-python/blob/v0.3.16/README.md#supported-backends)
+document CUDA 12.1 with Python 3.10. This source compatibility is not a completed
+CUDA image build or a ClusterUY GPU smoke test; validate both before a formal run.
 
-**Use sbatch** — the login node kills long-running processes:
+### Pull Singularity generation image on cluster
+
+**Use sbatch** — the login node kills long-running processes. The pull script still lives
+in the frozen thesis repo (it writes `~/slm-thesis.sif`); the **build context** is this repo.
 
 ```bash
 cd ~/SLMs-master-thesis
 sbatch Tesis/Codigo/scripts/clusteruy/pull_image.sh srobaina99/slm-thesis:latest
 ```
 
+| Item | Value |
+|------|-------|
+| Dockerfile | `scripts/clusteruy/Dockerfile` (this repo; build context = repo root) |
+| Docker Hub tag | `srobaina99/slm-thesis:latest` |
+| Singularity path | `~/slm-thesis.sif` |
+| llama-cpp | `llama-cpp-python==0.3.16`, compiled in-image for `sm_60` (P100) |
+| CEFR-SP runtime | `torch==2.4.1+cu121`, `transformers==4.55.4`, `pytorch-lightning==2.4.0` |
+| HF encoder (baked) | `bert-base-cased` via `prefetch_tsar_models.py --include-cefr-sp-base --skip-tsar` |
+| CEFR-SP `.ckpt` | **Bind-mount** (not baked; ~1.2 GB, gitignored). **Required** for Phase 2 sbatch |
+| TSAR ModernBERT | **Not** in this image (eval only) |
+
+### CEFR-SP checkpoint (host, not in the image)
+
+Download on a machine with network, then copy to the cluster (file-transfer port **10022**):
+
+```bash
+# Local
+./venv/bin/python scripts/download_cefr_sp_ckpt.py
+
+rsync -avz -e "ssh -p 10022" \
+  ./data/cefr_sp/level_estimator.ckpt \
+  santiago.robaina@cluster.uy:~/SLMs-experiments/data/cefr_sp/level_estimator.ckpt
+```
+
+Phase 2 generation sbatch scripts bind
+`$CEFR_SP_CKPT` or `$PROJECT_DIR/data/cefr_sp/level_estimator.ckpt` read-only and **exit 1**
+if the file is missing (so thesis runs cannot silently score every row as non-A1).
+Inside the container they set `CEFR_SP_CKPT=/workspace/data/cefr_sp/level_estimator.ckpt`,
+matching the bind destination even when the caller selects another host path.
+The host override selects the same checkpoint; it is not an alternate container path.
+`assess` still treats the ckpt as optional because it joins labels from `full.csv`.
+
 Ref: [Singularity on ClusterUY](https://www.cluster.uy/ayuda/singularity/)
 
 ### Eval image (`slm-thesis-eval`) — assessment path
 
-The **generation** image (`slm-thesis` / `~/slm-thesis.sif`) stays lean and **torch-free**.
-Assessment (`assess build`: TSAR ModernBERT ensemble + KVL v2) needs a **separate heavier
-image** with torch, `transformers>=4.55`, pinned ModernBERT SHAs under `HF_HOME`, and
-NLTK corpora under `NLTK_DATA`.
+The **generation** image (`slm-thesis` / `~/slm-thesis.sif`) includes llama-cpp-python for
+P100 **and** CEFR-SP runtime (torch + Lightning + baked `bert-base-cased`). It does **not**
+include the TSAR ModernBERT ensemble.
+
+Assessment (`assess build`: TSAR ModernBERT ensemble + KVL v2) needs a **separate** image
+with torch, `transformers>=4.55`, pinned ModernBERT SHAs under `HF_HOME`, and NLTK corpora
+under `NLTK_DATA`. `assess build` **joins** `cefr_sp_level` from the source run `full.csv`;
+it does not re-score CEFR-SP.
 
 | Item | Value |
 |------|-------|
@@ -324,8 +384,15 @@ git clone https://github.com/srobaina99/SLMs-master-thesis.git ~/SLMs-master-the
 cd ~/SLMs-master-thesis
 sbatch Tesis/Codigo/scripts/clusteruy/download_models.sh
 
-# 3. Pull Singularity image (submit as batch job)
+# 3. Pull generation Singularity image (submit as batch job)
+#    Rebuild+push from this repo first if the Hub tag is stale:
+#    ./scripts/clusteruy/build_gen_image.sh && docker push srobaina99/slm-thesis:latest
 sbatch Tesis/Codigo/scripts/clusteruy/pull_image.sh srobaina99/slm-thesis:latest
+
+# 4. Place CEFR-SP ckpt (download locally, then rsync/scp — port 10022)
+#    ./venv/bin/python scripts/download_cefr_sp_ckpt.py
+#    rsync -avz -e "ssh -p 10022" ./data/cefr_sp/level_estimator.ckpt \
+#      santiago.robaina@cluster.uy:~/SLMs-experiments/data/cefr_sp/level_estimator.ckpt
 ```
 
 Monitor:
@@ -341,7 +408,7 @@ tail -f smoke_<jobid>.out
 
 ### Why `PYTHONPATH` instead of `pip install`
 
-The lean Singularity image lacks a PEP 660 build backend. Inside the container:
+The Singularity image lacks a PEP 660 build backend. Inside the container:
 
 ```bash
 export PYTHONPATH=/workspace/src
@@ -360,7 +427,10 @@ sbatch scripts/clusteruy/smoke_test.sh
 ```
 
 Expected result: run bundle `results/runs/*_phase2_weights/` with 7 observations
-(Phi3, 1 prompt, full weight grid), all successful. Job completed in ~49s on node24 (P100).
+(Phi3, 1 prompt, full weight grid), all successful. The 2026-06-09 smoke (~49s on
+node24) predated in-generation CEFR-SP scoring; after rebuilding the image, expect
+CEFR-SP columns on successful rows. The job **fails before the sweep** if the ckpt
+is missing.
 
 For an interactive session instead:
 
@@ -368,8 +438,12 @@ For an interactive session instead:
 interactivo -gpun
 export SLM_GGUF_DIR="$HOME/SLMs-master-thesis/Tesis/Codigo/models/gguf"
 cd ~/SLMs-experiments
-singularity exec --nv --bind $(pwd):/workspace ~/slm-thesis.sif \
-  bash -c 'export PYTHONPATH=/workspace/src && cd /workspace && \
+singularity exec --nv --bind $(pwd):/workspace \
+  --bind $(pwd)/data/cefr_sp/level_estimator.ckpt:/workspace/data/cefr_sp/level_estimator.ckpt:ro \
+  ~/slm-thesis.sif \
+  bash -c 'export PYTHONPATH=/workspace/src TRANSFORMERS_OFFLINE=1 HF_HUB_OFFLINE=1 \
+    HF_HOME=/opt/hf_home NLTK_DATA=/usr/share/nltk_data \
+      CEFR_SP_CKPT=/workspace/data/cefr_sp/level_estimator.ckpt && cd /workspace && \
     python -m slm_experiments phase2 weights --models Phi3 --prompts 1 --no-plot'
 ```
 
@@ -381,7 +455,8 @@ Ref: [Cómo ejecutar un trabajo](https://www.cluster.uy/ayuda/como_ejecutar/)
 |--------|-------|-------------------------------|------------|
 | `scripts/clusteruy/run_phase2_weights.sh` | 7 weight factors | 700 | 12 h |
 | `scripts/clusteruy/run_phase2_prompting.sh` | 3 shot counts | 300 | 12 h |
-| `scripts/clusteruy/run_phase2_kvl_beam.sh` | 2 KVL beam widths | 200 | (see script) |
+| `scripts/clusteruy/run_phase2_guided.sh` | 4 top-k pools (`0,5,10,20`) | 400 | 12 h |
+| `scripts/clusteruy/run_phase2_kvl_beam.sh` | 4 KVL beam widths (`1,4,6,8`) | 400 | (see script) |
 | `scripts/clusteruy/run_phase2_beam.sh` | **Deprecated** | — | exits 1 |
 | `scripts/clusteruy/run_assess.sh` | Assessment (TSAR + KVL v2) | source-run dependent | 4 h |
 
@@ -389,10 +464,9 @@ Ref: [Cómo ejecutar un trabajo](https://www.cluster.uy/ayuda/como_ejecutar/)
 cd ~/SLMs-experiments
 sbatch scripts/clusteruy/run_phase2_weights.sh
 sbatch scripts/clusteruy/run_phase2_prompting.sh
+sbatch scripts/clusteruy/run_phase2_guided.sh
 sbatch scripts/clusteruy/run_phase2_kvl_beam.sh
-# guided (no dedicated sbatch yet):
-# singularity … python -m slm_experiments phase2 guided --prompts all --no-plot
-# assessment (requires ~/slm-thesis-eval.sif):
+# assessment (requires ~/slm-thesis-eval.sif; joins CEFR-SP from source full.csv):
 sbatch scripts/clusteruy/run_assess.sh <source_run_id>
 ```
 
@@ -443,15 +517,15 @@ Ref: [Tips y buenas prácticas](https://www.cluster.uy/ayuda/tips/)
 | Never run experiments on the login node | Login cgroup kills long processes |
 | Always submit pulls/downloads via `sbatch` | SSH drops kill interactive sessions; no tmux/screen |
 | Use `$SLURM_SUBMIT_DIR` in sbatch scripts | `$0` points to SLURM spool copy, not the repo |
-| Use `PYTHONPATH=/workspace/src` in container | `pip install -e .` fails in lean image |
+| Use `PYTHONPATH=/workspace/src` in container | `pip install -e .` fails (no PEP 660 backend) |
 | Pre-download NLTK data in the Docker image | Compute nodes may be air-gapped |
-| Use `--no-plot` on cluster | No display; matplotlib not in lean image |
+| Use `--no-plot` on cluster | No display; matplotlib not in the generation image |
 | Delete stale `~/singularity_tmp/` before re-pull | Failed pulls can fill the 300 GB home quota |
 | No cluster backups | Download results promptly |
-| Generation vs eval images | Lean `~/slm-thesis.sif` for Phase 2 gen; `~/slm-thesis-eval.sif` for `assess` (torch + HF pins) |
-| `TRANSFORMERS_OFFLINE=1` + baked `HF_HOME` on assess | No Hub fetch on air-gapped nodes; pins staged at image build |
+| Generation vs eval images | `~/slm-thesis.sif` = Phase 2 gen (llama-cpp + CEFR-SP runtime); `~/slm-thesis-eval.sif` = `assess` (TSAR ModernBERT, no llama-cpp) |
+| `TRANSFORMERS_OFFLINE=1` + baked `HF_HOME` | No Hub fetch on air-gapped nodes; gen bakes `bert-base-cased`, eval bakes TSAR pins |
 | Never flash-attn on ClusterUY | P100 is sm_60; TSAR forces eager/sdpa only |
-| CEFR-SP `.ckpt` bind-mount for eval image | Not baked (~1.2 GB); optional for `assess` (joins source labels) |
+| CEFR-SP `.ckpt` bind-mount | Not baked (~1.2 GB). **Required** for Phase 2 gen sbatch; optional for `assess` (joins source labels) |
 
 ---
 
@@ -474,13 +548,16 @@ ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes santiago.robaina@login.cluster.uy "hos
 | Location | Contents |
 |----------|----------|
 | `scripts/clusteruy/` | sbatch scripts for smoke test, Phase 2 sweeps, and `assess` |
-| `scripts/clusteruy/Dockerfile.eval` | `slm-thesis-eval` recipe (torch + TSAR pins + NLTK) |
-| `scripts/clusteruy/build_eval_image.sh` | Local `docker build --platform=linux/amd64` |
+| `scripts/clusteruy/Dockerfile` | `slm-thesis` generation recipe (llama-cpp P100 + CEFR-SP runtime + `bert-base-cased`) |
+| `scripts/clusteruy/build_gen_image.sh` | Local `docker build --platform=linux/amd64` for generation |
+| `scripts/clusteruy/Dockerfile.eval` | `slm-thesis-eval` recipe (torch + TSAR pins + NLTK; no llama-cpp) |
+| `scripts/clusteruy/build_eval_image.sh` | Local `docker build --platform=linux/amd64` for eval |
 | `scripts/clusteruy/smoke_assess_local.sh` | Offline in-container assess + status asserts |
 | `scripts/clusteruy/run_assess.sh` | ClusterUY `assess build` sbatch |
+| `scripts/clusteruy/run_phase2_guided.sh` | Phase 2 guided sweep sbatch |
 | `scripts/clusteruy/pull_eval_image.sh` | Singularity pull → `~/slm-thesis-eval.sif` |
-| `scripts/clusteruy/prefetch_tsar_models.py` | Build-time HF + NLTK prefetch (AST-parses `TSAR_MODELS`) |
+| `scripts/clusteruy/prefetch_tsar_models.py` | Build-time HF + NLTK prefetch (AST-parses `TSAR_MODELS`; gen uses `--skip-tsar --include-cefr-sp-base`) |
 | `scripts/clusteruy/fixtures/` | Committed tiny generation bundle for assess smoke |
-| `../SLMs-master-thesis/Tesis/Codigo/scripts/clusteruy/` | Lean generation Dockerfile, pull/download scripts |
+| `../SLMs-master-thesis/Tesis/Codigo/scripts/clusteruy/` | Legacy generation Dockerfile (superseded) plus pull/download scripts |
 | [ExperimentDesign.md](../ExperimentDesign.md) | Phase 2 sweep specifications |
 | [docs/models.md](models.md) | GGUF filenames, GPU requirements |

@@ -16,6 +16,7 @@
 # ============================================================
 # Phase 2 weight factor sweep (4 models × 7 weights × 25 prompts).
 # Submit: sbatch scripts/clusteruy/run_phase2_weights.sh
+# Requires data/cefr_sp/level_estimator.ckpt (or $CEFR_SP_CKPT) on the host.
 # See docs/clusteruy.md
 # ============================================================
 
@@ -29,10 +30,30 @@ echo "Job $SLURM_JOB_ID on $SLURM_NODELIST at $(date)"
 cd "$PROJECT_DIR"
 nvidia-smi
 
+# CEFR-SP is the A1 gate during generation. Require the ckpt on the host
+# (bind-mounted; not baked into the image).
+CKPT_HOST="${CEFR_SP_CKPT:-$PROJECT_DIR/data/cefr_sp/level_estimator.ckpt}"
+if [[ ! -f "$CKPT_HOST" ]]; then
+  echo "ERROR: CEFR-SP checkpoint missing: $CKPT_HOST" >&2
+  echo "Thesis-valid Phase 2 jobs require the ckpt (scored during generation)." >&2
+  echo "Download locally: ./venv/bin/python scripts/download_cefr_sp_ckpt.py" >&2
+  echo "Then rsync/scp to the cluster (file-transfer port 10022), or set CEFR_SP_CKPT." >&2
+  exit 1
+fi
+CEFR_BIND=(--bind "$CKPT_HOST":/workspace/data/cefr_sp/level_estimator.ckpt:ro)
+echo "Binding CEFR-SP ckpt: $CKPT_HOST"
+
 singularity exec --nv \
   --bind "$PROJECT_DIR":/workspace \
+  "${CEFR_BIND[@]}" \
   "$SIF_IMAGE" \
-  bash -c 'export PYTHONPATH=/workspace/src && cd /workspace && \
-    python -m slm_experiments phase2 weights --prompts all --no-plot'
+  bash -c 'export CEFR_SP_CKPT=/workspace/data/cefr_sp/level_estimator.ckpt \
+    PYTHONPATH=/workspace/src \
+    TRANSFORMERS_OFFLINE=1 \
+    HF_HUB_OFFLINE=1 \
+    HF_HOME=/opt/hf_home \
+    NLTK_DATA=/usr/share/nltk_data \
+    && cd /workspace \
+    && python -m slm_experiments phase2 weights --prompts all --no-plot'
 
 echo "Done at $(date)"

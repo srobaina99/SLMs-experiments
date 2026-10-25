@@ -248,6 +248,193 @@ class TestCliPhase2Run:
         assert mock_runner.run.call_args.kwargs["mode"] == "trie"
         assert mock_runner.run.call_args.kwargs["no_plot"] is True
 
+    @patch("slm_experiments.phase2.kvl_beam.KvlBeamSweepRunner")
+    def test_phase2_run_kvl_beam_dispatches(self, mock_runner_cls, capsys):
+        mock_runner = mock_runner_cls.return_value
+        mock_runner.run.return_value = (
+            "20260606_120000_phase2_kvl_beam",
+            Path("/tmp/run"),
+        )
+
+        main(["phase2", "kvl_beam"])
+
+        mock_runner.run.assert_called_once_with(
+            widths="1,4,6,8",
+            branch_factor=10,
+            kvl_l1="es",
+            prompts="3",
+            models="all",
+            seed=42,
+            no_plot=False,
+            cli_args=["phase2", "kvl_beam"],
+            enable_cefr_sp=True,
+            cefr_sp_ckpt_path="",
+            cefr_sp_device="cpu",
+        )
+
+        captured = capsys.readouterr()
+        assert "Run complete: 20260606_120000_phase2_kvl_beam" in captured.out
+        assert "20260606_120000_phase2_kvl_beam" in captured.out
+
+    @patch("slm_experiments.phase2.kvl_beam.KvlBeamSweepRunner")
+    def test_phase2_run_kvl_beam_custom_options(self, mock_runner_cls, capsys):
+        mock_runner = mock_runner_cls.return_value
+        mock_runner.run.return_value = (
+            "20260606_120000_phase2_kvl_beam",
+            Path("/tmp/run"),
+        )
+
+        argv = [
+            "phase2",
+            "kvl_beam",
+            "--widths",
+            "4,8",
+            "--branch-factor",
+            "5",
+            "--kvl-l1",
+            "de",
+            "--models",
+            "Qwen3",
+            "--prompts",
+            "1",
+            "--no-plot",
+            "--seed",
+            "99",
+        ]
+        main(argv)
+
+        mock_runner.run.assert_called_once_with(
+            widths="4,8",
+            branch_factor=5,
+            kvl_l1="de",
+            prompts="1",
+            models="Qwen3",
+            seed=99,
+            no_plot=True,
+            cli_args=argv,
+            enable_cefr_sp=True,
+            cefr_sp_ckpt_path="",
+            cefr_sp_device="cpu",
+        )
+
+        captured = capsys.readouterr()
+        assert "Run complete: 20260606_120000_phase2_kvl_beam" in captured.out
+
+    @patch("slm_experiments.phase2.kvl_beam.KvlBeamSweepRunner")
+    def test_phase2_run_kvl_beam_legacy_command(self, mock_runner_cls, capsys):
+        mock_runner = mock_runner_cls.return_value
+        mock_runner.run.return_value = (
+            "20260606_120000_phase2_kvl_beam",
+            Path("/tmp/run"),
+        )
+
+        main(["phase2", "run", "kvl_beam"])
+
+        mock_runner.run.assert_called_once_with(
+            widths="1,4,6,8",
+            branch_factor=10,
+            kvl_l1="es",
+            prompts="3",
+            models="all",
+            seed=42,
+            no_plot=False,
+            cli_args=["phase2", "kvl_beam"],
+            enable_cefr_sp=True,
+            cefr_sp_ckpt_path="",
+            cefr_sp_device="cpu",
+        )
+
+        captured = capsys.readouterr()
+        assert "Run complete: 20260606_120000_phase2_kvl_beam" in captured.out
+
+    @patch("slm_experiments.phase2.weights.WeightSweepRunner")
+    def test_phase2_run_weights_legacy_command(self, mock_runner_cls):
+        mock_runner = mock_runner_cls.return_value
+        mock_runner.run.return_value = ("run_id", Path("/tmp/run"))
+
+        main(["phase2", "run", "weights"])
+
+        mock_runner.run.assert_called_once_with(
+            weights="1.0,1.3,1.5,2.0,2.5,3.0,4.0",
+            prompts="3",
+            models="all",
+            seed=42,
+            no_plot=False,
+            cli_args=["phase2", "weights"],
+            enable_cefr_sp=True,
+            cefr_sp_ckpt_path="",
+            cefr_sp_device="cpu",
+        )
+
+    @patch("slm_experiments.phase2.weights.WeightSweepRunner")
+    def test_phase2_prompts_all_passed_as_string(self, mock_runner_cls):
+        mock_runner = mock_runner_cls.return_value
+        mock_runner.run.return_value = ("run_id", Path("/tmp/run"))
+
+        main(["phase2", "weights", "--prompts", "all"])
+
+        prompts = mock_runner.run.call_args.kwargs["prompts"]
+        assert prompts == "all"
+        assert isinstance(prompts, str)
+
+    @patch("slm_experiments.phase2.weights.WeightSweepRunner")
+    def test_phase2_models_comma_separated_passed_through(self, mock_runner_cls):
+        mock_runner = mock_runner_cls.return_value
+        mock_runner.run.return_value = ("run_id", Path("/tmp/run"))
+
+        main(["phase2", "weights", "--models", "Qwen2,Qwen3"])
+
+        assert mock_runner.run.call_args.kwargs["models"] == "Qwen2,Qwen3"
+
+    @patch("slm_experiments.phase2.weights.WeightSweepRunner")
+    def test_phase2_cefr_sp_flags_passed_through(self, mock_runner_cls):
+        mock_runner = mock_runner_cls.return_value
+        mock_runner.run.return_value = ("run_id", Path("/tmp/run"))
+
+        main(
+            [
+                "phase2",
+                "weights",
+                "--no-enable-cefr-sp",
+                "--cefr-sp-ckpt",
+                "/tmp/level_estimator.ckpt",
+                "--cefr-sp-device",
+                "cuda",
+            ]
+        )
+
+        kwargs = mock_runner.run.call_args.kwargs
+        assert kwargs["enable_cefr_sp"] is False
+        assert kwargs["cefr_sp_ckpt_path"] == "/tmp/level_estimator.ckpt"
+        assert kwargs["cefr_sp_device"] == "cuda"
+
+    def test_phase2_without_sweep_exits(self):
+        with pytest.raises(SystemExit) as exc_info:
+            main(["phase2"])
+
+        assert exc_info.value.code != 0
+
+    def test_phase2_guided_invalid_mode_exits(self):
+        with pytest.raises(SystemExit) as exc_info:
+            main(["phase2", "guided", "--mode", "bogus"])
+
+        assert exc_info.value.code == 2
+
+    def test_phase2_kvl_beam_invalid_l1_exits(self):
+        with pytest.raises(SystemExit) as exc_info:
+            main(["phase2", "kvl_beam", "--kvl-l1", "fr"])
+
+        assert exc_info.value.code == 2
+
+    @patch("slm_experiments.phase2.beam.BeamSweepRunner")
+    def test_phase2_beam_never_instantiates_runner(self, mock_beam_cls, capsys):
+        with pytest.raises(SystemExit) as exc_info:
+            main(["phase2", "beam"])
+
+        assert exc_info.value.code == 1
+        mock_beam_cls.assert_not_called()
+        assert "deprecated" in capsys.readouterr().err.lower()
+
 
 class TestCliHuman:
     @patch("slm_experiments.human.export.HumanExporter")

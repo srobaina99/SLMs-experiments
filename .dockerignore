@@ -1,4 +1,4 @@
-# Keep the eval-image build context small (context = repo root).
+# Keep Docker build context small (context = repo root for gen + eval images).
 
 .git/
 .github/
@@ -13,7 +13,7 @@ venv/
 .ruff_cache/
 .DS_Store
 
-# Large / irrelevant for the eval image
+# Large / irrelevant for gen and eval images
 results/
 models/gguf/
 models/

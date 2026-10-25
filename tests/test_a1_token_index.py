@@ -1,12 +1,15 @@
 """Tests for A1TokenIndex tokenization and context switching."""
 
+import math
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
 from slm_experiments.models.a1_token_index import A1TokenIndex, A1TokenTrie
 from slm_experiments.models.base import REPO_ROOT
+from slm_experiments.models.llamacpp import LlamaCppBaseWrapper
 
 
 VOCAB_PATH = (
@@ -43,6 +46,30 @@ class TestA1TokenIndexBuild:
         assert index.id_to_words[10] == ("hello",)
         assert index.id_to_words[20] == ("cat",)
         assert index.id_to_words[21] == ("cat",)
+
+    def test_weighting_ids_are_mid_union_start(self):
+        """Logit-bias weighting (llamacpp._create_logit_bias) uses mid ∪ start."""
+        llm = _make_tokenizer(
+            {
+                " hello": [10],
+                "hello": [11],
+                " cat": [20, 21],
+                "cat": [22],
+            }
+        )
+        index = A1TokenIndex.build(llm, ["hello", "cat"], use_trie=False)
+        bias = LlamaCppBaseWrapper._create_logit_bias(
+            SimpleNamespace(llm=llm), ["hello", "cat"], weight_factor=2.0
+        )
+        weighting_ids = frozenset(bias)
+
+        assert bias == {
+            token_id: pytest.approx(math.log(2.0))
+            for token_id in (10, 11, 20, 21, 22)
+        }
+        assert index.mid_sentence_ids <= weighting_ids
+        assert index.sentence_start_ids <= weighting_ids
+        assert index.mid_sentence_ids != index.sentence_start_ids
 
     def test_build_includes_stop_token_ids_in_both_context_sets(self):
         llm = _make_tokenizer(

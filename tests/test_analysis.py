@@ -72,6 +72,51 @@ class MockFailureModel:
         }
 
 
+class MockGuidedModelWrapper:
+    def generate_guided(self, prompt: str, config: ExperimentConfig) -> dict:
+        return {
+            "response": SIMPLE_RESPONSE,
+            "response_time_seconds": 2.0,
+            "generation_successful": True,
+            "guided_top_k": config.guided_top_k,
+            "guided_mode": config.guided_mode,
+            "guided_steps_a1_chosen": 5,
+            "guided_steps_total": 20,
+            "guided_intervention_rate": 0.25,
+        }
+
+
+class MockKvlBeamModelWrapper:
+    def generate_kvl_beam(
+        self,
+        prompt: str,
+        config: ExperimentConfig,
+        beam_width: int = 4,
+        branch_factor: int = 10,
+    ) -> dict:
+        return {
+            "response": SIMPLE_RESPONSE,
+            "response_time_seconds": 2.0,
+            "generation_successful": True,
+            "kvl_beam_width": beam_width,
+            "kvl_branch_factor": branch_factor,
+            "kvl_beam_steps_total": 30,
+            "kvl_beam_words_scored": 5,
+            "kvl_beam_running_mean": 2.0,
+            "kvl_beam_logprob_tiebreak": -1.0,
+            "kvl_beam_candidates_pruned": 80,
+        }
+
+
+# In-run identity vs one intervention per thesis family.
+FAMILY_SWEEPS = (
+    ("weights", "weight_factor", 1.0, 2.0, "weight_factor=1", "weight_factor=2"),
+    ("prompting", "num_shots", 0, 3, "num_shots=0", "num_shots=3"),
+    ("guided", "guided_top_k", 0, 10, "guided_top_k=0", "guided_top_k=10"),
+    ("kvl_beam", "kvl_beam_width", 1, 8, "kvl_beam_width=1", "kvl_beam_width=8"),
+)
+
+
 def _write_generation_bundle(
     store: RunStore,
     results: list,
@@ -195,6 +240,125 @@ def _build_weights_assessment(tmp_path: Path) -> tuple[str, RunStore]:
     ):
         assess_id, _ = AssessmentBundler(results_root=tmp_path).build(
             [source_id], seed=42
+        )
+    return assess_id, store
+
+
+def _family_sweep_result(
+    pipeline: ExperimentPipeline,
+    *,
+    experiment: str,
+    column: str,
+    value,
+    prompt_id: str,
+    prompt: str,
+    text: str,
+    is_identity: bool,
+):
+    kwargs = dict(
+        model_name="Qwen3",
+        prompt_id=prompt_id,
+        config_prompting=True,
+    )
+    if experiment == "weights":
+        kwargs.update(config_weighting=True, weight_factor=float(value), num_shots=0)
+        result = pipeline.run(prompt, ExperimentConfig(**kwargs), MockSuccessModel(text))
+    elif experiment == "prompting":
+        kwargs.update(config_weighting=False, num_shots=int(value))
+        result = pipeline.run(prompt, ExperimentConfig(**kwargs), MockSuccessModel(text))
+    elif experiment == "guided":
+        kwargs.update(
+            config_weighting=False,
+            config_guided=not is_identity,
+            guided_top_k=int(value),
+            guided_mode="flat",
+            experiment_name=f"Qwen3_guided_k{int(value)}",
+        )
+        config = ExperimentConfig(**kwargs)
+        if is_identity:
+            result = pipeline.run(prompt, config, MockSuccessModel(text))
+            result.guided_top_k = 0
+        else:
+            result = pipeline.run_guided(prompt, config, MockGuidedModelWrapper())
+            result.cleaned_response = text
+            result.response = text
+    else:
+        kwargs.update(
+            config_weighting=False,
+            config_kvl_beam=not is_identity,
+            experiment_name=f"Qwen3_kvl_beam_w{int(value)}",
+        )
+        config = ExperimentConfig(**kwargs)
+        if is_identity:
+            result = pipeline.run(prompt, config, MockSuccessModel(text))
+            result.kvl_beam_width = 1
+        else:
+            result = pipeline.run_kvl_beam(
+                prompt, config, MockKvlBeamModelWrapper(), beam_width=int(value)
+            )
+            result.cleaned_response = text
+            result.response = text
+    if is_identity:
+        result.cefr_sp_level_ordinal = 2.0
+        result.meets_a1_criteria = False
+        result.cefr_sp_level = "A2"
+    else:
+        result.cefr_sp_level_ordinal = 0.5
+        result.meets_a1_criteria = True
+        result.cefr_sp_level = "A1"
+    return result
+
+
+def _build_all_families_assessment(tmp_path: Path) -> tuple[str, RunStore]:
+    """One source run per thesis family, each with identity + intervention."""
+    pipeline = ExperimentPipeline()
+    store = RunStore(tmp_path)
+    source_ids = []
+    prompts = [
+        ("p01", "What is a friend?", SIMPLE_RESPONSE, ALT_RESPONSE),
+        ("p02", "What is a dog?", ALT_RESPONSE, HARD_RESPONSE),
+    ]
+    for i, (experiment, column, identity, intervention, _b, _a) in enumerate(
+        FAMILY_SWEEPS
+    ):
+        results = []
+        for prompt_id, prompt, base_text, int_text in prompts:
+            results.append(
+                _family_sweep_result(
+                    pipeline,
+                    experiment=experiment,
+                    column=column,
+                    value=identity,
+                    prompt_id=prompt_id,
+                    prompt=prompt,
+                    text=base_text,
+                    is_identity=True,
+                )
+            )
+            results.append(
+                _family_sweep_result(
+                    pipeline,
+                    experiment=experiment,
+                    column=column,
+                    value=intervention,
+                    prompt_id=prompt_id,
+                    prompt=prompt,
+                    text=int_text,
+                    is_identity=False,
+                )
+            )
+        started = datetime(2026, 6, 6, 14, 30, 22 + i, tzinfo=timezone.utc)
+        source_ids.append(
+            _write_generation_bundle(
+                store, results, experiment=experiment, started=started
+            )
+        )
+    with patch(
+        "slm_experiments.evaluation.assessment.bundle.score_items",
+        side_effect=_fake_score_items,
+    ):
+        assess_id, _ = AssessmentBundler(results_root=tmp_path).build(
+            source_ids, seed=42
         )
     return assess_id, store
 
@@ -390,6 +554,23 @@ class TestFamilyAwareArm:
             )
             == "intervention"
         )
+
+    def test_family_baseline_identity_points(self):
+        from slm_experiments.evaluation.assessment.analysis import (
+            FAMILY_BASELINE,
+            baseline_arm_key,
+        )
+
+        assert FAMILY_BASELINE == {
+            "weights": {"column": "weight_factor", "value": 1.0},
+            "prompting": {"column": "num_shots", "value": 0},
+            "guided": {"column": "guided_top_k", "value": 0},
+            "kvl_beam": {"column": "kvl_beam_width", "value": 1},
+        }
+        assert baseline_arm_key("weights") == "weight_factor=1"
+        assert baseline_arm_key("prompting") == "num_shots=0"
+        assert baseline_arm_key("guided") == "guided_top_k=0"
+        assert baseline_arm_key("kvl_beam") == "kvl_beam_width=1"
 
 
 class TestPairedDeltaConstruction:
@@ -667,6 +848,25 @@ class TestAnalyzeBundle:
         # Stratify by model first; family nested under model.
         family_block = analysis["by_model"]["Qwen3"]["by_family"]["weights"]
         assert family_block["status"] == "ok"
+        assert family_block["baseline_arm"] == "weight_factor=1"
+        arm = family_block["by_arm"]["weight_factor=2"]
+        assert arm["rates"]["a1_pass_rate_delta"] == pytest.approx(2 / 3)
+        assert arm["rates"]["generation_failure_rate"] == pytest.approx(1 / 3)
+        assert arm["rates"]["hit_max_tokens_rate"] == pytest.approx(1 / 3)
+        assert arm["rates"]["baseline_a1_pass_rate"] == pytest.approx(0.0)
+        cefr = arm["metrics"]["cefr_sp_level_ordinal"]
+        assert cefr["role"] == "primary"
+        assert cefr["easier_delta"] == pytest.approx(1.5)
+        assert cefr["n_pairs"] == 2  # p03 intervention failed → pair dropped
+        assert arm["metrics"]["cefr_tsar_ensemble_ordinal"]["role"] == "secondary"
+
+        meta = analysis["metadata"]
+        assert meta["method"] == "percentile_bootstrap"
+        assert meta["ci"] == 0.95
+        assert meta["framing"] == "exploratory_descriptive"
+        assert meta["multiplicity_correction"] is None
+        assert meta["metrics"]["cefr_sp_level_ordinal"]["role"] == "primary"
+        assert meta["metrics"]["cefr_tsar_ensemble_ordinal"]["role"] == "secondary"
 
         deltas = pd.read_csv(out / "paired_deltas.csv")
         assert "model" in deltas.columns
@@ -765,6 +965,122 @@ class TestAnalyzeBundle:
         )
         assert manifest["analysis"]["bootstrap_seed"] == 11
         assert manifest["analysis"]["resamples"] == 50
+
+    def test_analyze_cli_protocol_defaults(self):
+        from slm_experiments.cli import _build_parser
+
+        args = _build_parser().parse_args(
+            ["assess", "analyze", "--assessment-run-id", "x"]
+        )
+        assert args.resamples == 10_000
+        assert args.bootstrap_seed == 42
+
+    def test_analyze_default_resamples_recorded_in_manifest(self, tmp_path: Path):
+        from slm_experiments.evaluation.assessment.analysis import (
+            DEFAULT_BOOTSTRAP_SEED,
+            DEFAULT_RESAMPLES,
+            analyze_assessment_bundle,
+        )
+
+        assert DEFAULT_RESAMPLES == 10_000
+        assert DEFAULT_BOOTSTRAP_SEED == 42
+        assess_id, store = _build_weights_assessment(tmp_path)
+        analyze_assessment_bundle(assess_id, results_root=tmp_path)
+        manifest = store.read_manifest(assess_id)
+        assert manifest["analysis"]["resamples"] == 10_000
+        assert manifest["analysis"]["bootstrap_seed"] == 42
+        assert manifest["analysis"]["ci"] == 0.95
+
+    def test_paired_deltas_vs_in_run_baselines_all_families(self, tmp_path: Path):
+        from slm_experiments.evaluation.assessment.analysis import (
+            FAMILY_BASELINE,
+            analyze_assessment_bundle,
+        )
+
+        assess_id, store = _build_all_families_assessment(tmp_path)
+        out = analyze_assessment_bundle(
+            assess_id, results_root=tmp_path, bootstrap_seed=42, resamples=50
+        )
+        analysis = json.loads(
+            (out / "analysis.json").read_text(encoding="utf-8")
+        )
+        families = analysis["by_model"]["Qwen3"]["by_family"]
+        assert set(families) == {"weights", "prompting", "guided", "kvl_beam"}
+
+        deltas = pd.read_csv(out / "paired_deltas.csv")
+        for experiment, _col, _id, _int, baseline_arm, arm_key in FAMILY_SWEEPS:
+            block = families[experiment]
+            assert block["status"] == "ok", block
+            assert block["baseline_arm"] == baseline_arm
+            assert block["baseline_arm"] == (
+                f"{FAMILY_BASELINE[experiment]['column']}="
+                f"{int(FAMILY_BASELINE[experiment]['value'])}"
+            )
+            arm = block["by_arm"][arm_key]
+            # Identity A1=False, intervention A1=True; 2 prompts, no failures.
+            assert arm["rates"]["a1_pass_rate_delta"] == pytest.approx(1.0)
+            assert arm["rates"]["generation_failure_rate"] == 0.0
+            assert arm["rates"]["hit_max_tokens_rate"] == 0.0
+            cefr = arm["metrics"]["cefr_sp_level_ordinal"]
+            assert cefr["role"] == "primary"
+            assert cefr["n_pairs"] == 2
+            assert cefr["easier_delta"] == pytest.approx(1.5)
+            assert cefr["easier_orientation"] == "lower"
+            assert "generation_failure_rate" in arm["rates"]
+            fam_rows = deltas[
+                (deltas["family"] == experiment) & (deltas["metric"] == "cefr_sp_level_ordinal")
+            ]
+            assert len(fam_rows) == 1
+            assert fam_rows.iloc[0]["a1_pass_rate_delta"] == pytest.approx(1.0)
+
+    @pytest.mark.parametrize(
+        "experiment,column,intervention",
+        [
+            ("prompting", "num_shots", 3),
+            ("guided", "guided_top_k", 10),
+            ("kvl_beam", "kvl_beam_width", 8),
+        ],
+    )
+    def test_no_baseline_when_identity_omitted(
+        self, tmp_path: Path, experiment: str, column: str, intervention
+    ):
+        from slm_experiments.evaluation.assessment.analysis import (
+            analyze_assessment_bundle,
+            baseline_arm_key,
+        )
+
+        pipeline = ExperimentPipeline()
+        result = _family_sweep_result(
+            pipeline,
+            experiment=experiment,
+            column=column,
+            value=intervention,
+            prompt_id="p01",
+            prompt="What is a friend?",
+            text=SIMPLE_RESPONSE,
+            is_identity=False,
+        )
+        store = RunStore(tmp_path)
+        source_id = _write_generation_bundle(store, [result], experiment=experiment)
+        with patch(
+            "slm_experiments.evaluation.assessment.bundle.score_items",
+            side_effect=_fake_score_items,
+        ):
+            assess_id, _ = AssessmentBundler(results_root=tmp_path).build(
+                [source_id], seed=42
+            )
+        analyze_assessment_bundle(
+            assess_id, results_root=tmp_path, bootstrap_seed=42, resamples=20
+        )
+        analysis = json.loads(
+            (store.run_dir(assess_id) / "analysis" / "analysis.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        block = analysis["by_model"]["Qwen3"]["by_family"][experiment]
+        assert block["status"] == "no_baseline"
+        assert block["baseline_arm"] == baseline_arm_key(experiment)
+        assert any("baseline" in w.lower() for w in analysis["warnings"])
 
 
 # ---------------------------------------------------------------------------

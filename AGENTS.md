@@ -46,7 +46,7 @@ SLMs-experiments/
 ├── AGENTS.md                 # This file — agent entry point
 ├── README.md                 # Human quickstart
 ├── ExperimentDesign.md       # Formal experiment specification
-├── scripts/clusteruy/        # SLURM batch scripts (smoke test + Phase 2 sweeps)
+├── scripts/clusteruy/        # SLURM batch + generation/eval Dockerfiles (gen has CEFR-SP runtime; ckpt bind-mounted)
 ├── requirements.txt          # Runtime dependencies (8 packages)
 ├── requirements-dev.txt      # pytest
 ├── pytest.ini

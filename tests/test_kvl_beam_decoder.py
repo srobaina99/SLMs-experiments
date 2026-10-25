@@ -381,3 +381,25 @@ class TestKvlBeamDecoderStopTokens:
         assert result.text == "friend "
         assert result.steps_total == 2
         assert TOK_STOP not in result.token_ids
+
+
+class TestKvlBeamDecoderInvalidL1:
+    def test_unsupported_l1_raises_when_scoring(self, fixture_lookup):
+        decoder = KvlBeamDecoder(
+            kvl_lookup=fixture_lookup,
+            l1="fr",
+            text_evaluator=TextEvaluator(),
+            beam_width=1,
+            branch_factor=2,
+        )
+        prompt = [100]
+        prompt_len = len(prompt)
+        eval_fn = make_eval_fn(
+            prompt_len,
+            {
+                (): {TOK_FRIEND: 4.0},
+            },
+        )
+
+        with pytest.raises(ValueError, match="Unsupported L1"):
+            decoder.decode(eval_fn, prompt, max_tokens=1, stop=[])
