@@ -5,11 +5,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from slm_experiments.core.config import ExperimentConfig
 from slm_experiments.core.pipeline import ExperimentPipeline
 from slm_experiments.core.result import ExperimentResult
 from slm_experiments.core.run_store import RunStore, compute_summary_stats, make_run_id
+
+THESIS_RATE_FIELDS = (
+    "a1_pass_rate",
+    "generation_failure_rate",
+    "hit_max_tokens_rate",
+)
 
 
 SIMPLE_RESPONSE = (
@@ -125,6 +132,89 @@ def _make_a1_pipeline_results():
         "What is a friend?", config_hard, MockSuccessModel()
     )
     return [simple, hard]
+
+
+def _assert_thesis_rates(block: dict) -> None:
+    for field in THESIS_RATE_FIELDS:
+        assert field in block, f"missing {field} in thesis cell"
+        assert isinstance(block[field], float)
+
+
+def _phase2_family_results(experiment: str, column: str, identity, intervention):
+    """Identity + intervention for two models, plus one failed intervention row.
+
+    Mirrors Phase 2 baseline stamping: guided k=0 and kvl width=1 are plain
+    greedy rows with the sweep field written onto the result.
+    """
+    pipeline = ExperimentPipeline()
+    guided_model = MockGuidedModelWrapper()
+    kvl_model = MockKvlBeamModelWrapper()
+    results = []
+
+    def _config(model: str, value, prompt_id: str) -> ExperimentConfig:
+        kwargs = dict(
+            model_name=model,
+            prompt_id=prompt_id,
+            config_prompting=True,
+        )
+        if experiment == "weights":
+            kwargs.update(config_weighting=True, weight_factor=float(value))
+        elif experiment == "prompting":
+            kwargs.update(config_weighting=False, num_shots=int(value))
+        elif experiment == "guided":
+            kwargs.update(
+                config_weighting=False,
+                config_guided=int(value) != 0,
+                guided_top_k=int(value),
+                guided_mode="flat",
+                experiment_name=f"{model}_guided_k{int(value)}",
+            )
+        else:
+            kwargs.update(
+                config_weighting=False,
+                config_kvl_beam=int(value) != 1,
+                experiment_name=f"{model}_kvl_beam_w{int(value)}",
+            )
+        return ExperimentConfig(**kwargs)
+
+    def _generate(config: ExperimentConfig, model_wrapper, value):
+        is_identity = value == identity
+        if experiment == "guided" and not is_identity:
+            result = pipeline.run_guided("What is a friend?", config, guided_model)
+        elif experiment == "kvl_beam" and not is_identity:
+            result = pipeline.run_kvl_beam(
+                "What is a friend?",
+                config,
+                kvl_model,
+                beam_width=int(value),
+            )
+        else:
+            result = pipeline.run("What is a friend?", config, model_wrapper)
+            if experiment == "guided" and is_identity:
+                result.guided_top_k = 0
+            elif experiment == "kvl_beam" and is_identity:
+                result.kvl_beam_width = 1
+        return result
+
+    for model in ("Qwen3", "TinyLlama"):
+        for value, a1 in ((identity, model == "Qwen3"), (intervention, True)):
+            result = _generate(_config(model, value, "p01"), MockSuccessModel(), value)
+            result.meets_a1_criteria = a1
+            results.append(result)
+
+    fail = pipeline.run(
+        "What is a friend?",
+        _config("Qwen3", intervention, "p02"),
+        MockFailureModel(),
+    )
+    fail.hit_max_tokens = True
+    fail.meets_a1_criteria = False
+    if experiment == "guided":
+        fail.guided_top_k = int(intervention)
+    elif experiment == "kvl_beam":
+        fail.kvl_beam_width = int(intervention)
+    results.append(fail)
+    return results
 
 
 def _make_results():
@@ -506,3 +596,87 @@ class TestRunStore:
         manifests = store.list_runs()
         assert len(manifests) == 1
         assert manifests[0]["run_id"] == run_id
+
+    def test_specification_csv_european_decimals(self, tmp_path: Path):
+        results = _make_results()
+        success = next(r for r in results if r.generation_successful)
+        success.flesch_kincaid_grade = 4.5
+        success.gunning_fog = 6.25
+        success.spache_readability = 3.75
+
+        store = RunStore(tmp_path)
+        out_dir = store.write_bundle(
+            make_run_id(2, "weights"), results, phase=2, experiment="weights"
+        )
+        raw = (out_dir / "specification.csv").read_text(encoding="utf-8")
+        assert "4,5" in raw
+        assert "6,25" in raw
+        assert "3,75" in raw
+        assert "4.5" not in raw
+        assert "6.25" not in raw
+
+        spec = pd.read_csv(out_dir / "specification.csv", decimal=",")
+        row = spec.loc[spec["generation_successful"] == True].iloc[0]  # noqa: E712
+        assert row["flesch_kincaid_grade"] == pytest.approx(4.5)
+        assert row["gunning_fog"] == pytest.approx(6.25)
+        assert row["spache_readability"] == pytest.approx(3.75)
+
+    @pytest.mark.parametrize(
+        "experiment,section,column,identity,intervention",
+        [
+            ("weights", "by_weight_factor", "weight_factor", 1.0, 2.0),
+            ("prompting", "by_num_shots", "num_shots", 0, 3),
+            ("guided", "by_guided_top_k", "guided_top_k", 0, 10),
+            ("kvl_beam", "by_kvl_beam_width", "kvl_beam_width", 1, 8),
+        ],
+    )
+    def test_summary_thesis_cells_for_phase2_families(
+        self,
+        experiment: str,
+        section: str,
+        column: str,
+        identity,
+        intervention,
+    ):
+        results = _phase2_family_results(experiment, column, identity, intervention)
+        summary = compute_summary_stats(results, experiment=experiment)
+
+        identity_key = str(int(identity)) if column != "weight_factor" else "1"
+        intervention_key = (
+            str(int(intervention)) if column != "weight_factor" else "2"
+        )
+
+        assert summary["metadata"]["sweep_dimension"] == column
+        assert identity_key in summary["metadata"]["sweep_values"]
+        assert intervention_key in summary["metadata"]["sweep_values"]
+        assert identity_key in summary[section]
+        assert intervention_key in summary[section]
+
+        _assert_thesis_rates(summary["metadata"])
+        _assert_thesis_rates(summary[section][identity_key])
+        _assert_thesis_rates(summary[section][intervention_key])
+
+        # 5 rows: 2 models × identity, 2 models × intervention success, 1 fail.
+        assert summary["metadata"]["total_experiments"] == 5
+        assert summary["metadata"]["failed_experiments"] == 1
+        assert summary["metadata"]["generation_failure_rate"] == pytest.approx(1 / 5)
+        # Failed row lives on the intervention arm; identity is all successes.
+        assert summary[section][identity_key]["generation_failure_rate"] == 0.0
+        assert summary[section][intervention_key]["generation_failure_rate"] == pytest.approx(
+            1 / 3
+        )
+        assert summary[section][intervention_key]["a1_pass_rate"] == pytest.approx(2 / 3)
+        # Means exclude the failed row (word_count would dilute toward 0).
+        assert summary[section][intervention_key]["word_count"]["mean"] > 0
+
+        assert set(summary["by_model"]) == {"Qwen3", "TinyLlama"}
+        qwen = summary["by_model"]["Qwen3"]
+        _assert_thesis_rates(qwen)
+        _assert_thesis_rates(qwen[section][identity_key])
+        _assert_thesis_rates(qwen[section][intervention_key])
+        # Qwen3 intervention: 1 success A1 + 1 failure → rates use both rows.
+        assert qwen[section][intervention_key]["generation_failure_rate"] == pytest.approx(
+            0.5
+        )
+        assert qwen[section][intervention_key]["a1_pass_rate"] == pytest.approx(0.5)
+        assert qwen[section][intervention_key]["hit_max_tokens_rate"] == pytest.approx(0.5)

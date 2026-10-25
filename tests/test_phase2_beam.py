@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+import pandas as pd
 import pytest
 
 from slm_experiments.core.config import ExperimentConfig
@@ -26,8 +27,11 @@ class MockBeamModelWrapper:
     def __init__(self, model_name: str, seed: int = 42, **kwargs):
         self.model_name = model_name
         self.seed = seed
+        self.cleanup_calls = 0
+        self.generate_beam_calls = 0
 
     def generate_beam(self, prompt, config, beam_width=4, selection_method="a1_ratio"):
+        self.generate_beam_calls += 1
         return {
             "response": SIMPLE_RESPONSE,
             "response_time_seconds": 2.5,
@@ -41,7 +45,7 @@ class MockBeamModelWrapper:
         }
 
     def cleanup(self):
-        pass
+        self.cleanup_calls += 1
 
 
 class TestBeamConfigs:
@@ -55,6 +59,10 @@ class TestBeamConfigs:
             assert config.config_weighting is False
             assert config.config_prompting is True
             assert config.num_shots == 0
+            assert config.temperature == 0.0
+            assert config.top_k == 50
+            assert config.config_guided is False
+            assert config.config_kvl_beam is False
 
     def test_beam_width_encoded_in_experiment_name(self):
         configs = create_beam_configs([4, 10])
@@ -69,6 +77,18 @@ class TestBeamConfigs:
     def test_parse_widths_invalid(self):
         with pytest.raises(ValueError, match="must be > 0"):
             parse_widths("0,4")
+
+    def test_parse_widths_empty_or_whitespace(self):
+        with pytest.raises(ValueError, match="must not be empty"):
+            parse_widths("")
+        with pytest.raises(ValueError, match="must not be empty"):
+            parse_widths("   ")
+        with pytest.raises(ValueError, match="at least one value"):
+            parse_widths(",")
+
+    def test_parse_widths_trailing_comma(self):
+        assert parse_widths("4,8,") == [4, 8]
+        assert parse_widths(" 4 , 10 , ") == [4, 10]
 
 
 class TestBeamSweepRunner:
@@ -155,3 +175,90 @@ class TestBeamSweepRunner:
         config = ExperimentConfig(experiment_name="invalid_name")
         with pytest.raises(ValueError, match="Cannot parse beam width"):
             beam_width_from_config(config)
+
+    @patch("slm_experiments.phase2.beam.get_model_wrapper")
+    def test_unknown_model_raises(self, mock_get_wrapper, tmp_path: Path):
+        mock_get_wrapper.return_value = MockBeamModelWrapper("Qwen3")
+        runner = BeamSweepRunner(results_root=tmp_path)
+        with pytest.raises(ValueError, match="Unknown model"):
+            runner.run(prompts="1", models="NotAModel", widths="4", no_plot=True)
+        mock_get_wrapper.assert_not_called()
+
+    @patch("slm_experiments.plot.plot_run")
+    @patch("slm_experiments.phase2.beam.get_model_wrapper")
+    def test_no_plot_true_skips_plot_run(
+        self, mock_get_wrapper, mock_plot_run, tmp_path: Path
+    ):
+        mock_plot_run.return_value = tmp_path / "plots"
+        mock_get_wrapper.return_value = MockBeamModelWrapper("Qwen3")
+
+        runner = BeamSweepRunner(results_root=tmp_path)
+        runner.run(prompts="1", models="Qwen3", widths="4", no_plot=True)
+
+        mock_plot_run.assert_not_called()
+
+    @patch("slm_experiments.plot.plot_run")
+    @patch("slm_experiments.phase2.beam.get_model_wrapper")
+    def test_no_plot_false_calls_plot_run(
+        self, mock_get_wrapper, mock_plot_run, tmp_path: Path
+    ):
+        mock_plot_run.return_value = tmp_path / "plots"
+        mock_get_wrapper.return_value = MockBeamModelWrapper("Qwen3")
+
+        runner = BeamSweepRunner(results_root=tmp_path)
+        runner.run(prompts="1", models="Qwen3", widths="4", no_plot=False)
+
+        mock_plot_run.assert_called_once()
+        assert mock_plot_run.call_args.kwargs["results_root"] == tmp_path
+
+    @patch("slm_experiments.phase2.beam.get_model_wrapper")
+    def test_wrapper_cleanup_called(self, mock_get_wrapper, tmp_path: Path):
+        wrappers = []
+
+        def factory(name, seed=42, **kwargs):
+            wrapper = MockBeamModelWrapper(name, seed=seed)
+            wrappers.append(wrapper)
+            return wrapper
+
+        mock_get_wrapper.side_effect = factory
+
+        runner = BeamSweepRunner(results_root=tmp_path)
+        runner.run(prompts="1", models="all", widths="4", no_plot=True)
+
+        assert len(wrappers) == len(MODEL_CONFIGS)
+        assert all(w.cleanup_calls == 1 for w in wrappers)
+
+    @patch("slm_experiments.phase2.beam.get_model_wrapper")
+    def test_failed_generation_still_in_bundle(self, mock_get_wrapper, tmp_path: Path):
+        class FailingWrapper(MockBeamModelWrapper):
+            def generate_beam(self, prompt, config, beam_width=4, selection_method="a1_ratio"):
+                self.generate_beam_calls += 1
+                return {
+                    "response": "",
+                    "response_time_seconds": 0.4,
+                    "generation_successful": False,
+                    "beam_selection_method": selection_method,
+                    "beam_a1_ratio": 0.0,
+                    "beam_a1_count": 0,
+                    "beam_content_word_count": 0,
+                    "beam_cumulative_logprob": 0.0,
+                    "beam_width": beam_width,
+                }
+
+        mock_get_wrapper.return_value = FailingWrapper("Qwen3")
+
+        runner = BeamSweepRunner(results_root=tmp_path)
+        _, out_dir = runner.run(
+            prompts="1", models="Qwen3", widths="4", no_plot=True
+        )
+
+        manifest = json.loads((out_dir / "manifest.json").read_text())
+        assert manifest["observations"]["total"] == 1
+
+        full = pd.read_csv(out_dir / "full.csv")
+        assert len(full) == 1
+        assert bool(full.iloc[0]["generation_successful"]) is False
+
+        summary = json.loads((out_dir / "summary.json").read_text())
+        assert summary["metadata"]["failed_experiments"] == 1
+        assert summary["metadata"]["generation_failure_rate"] == pytest.approx(1.0)

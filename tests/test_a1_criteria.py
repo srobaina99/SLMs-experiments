@@ -44,6 +44,17 @@ def test_fails_when_cefr_sp_level_missing():
     )
 
 
+def test_tsar_label_is_not_an_argument():
+    """TSAR is assessment-only; the live A1 gate cannot see an ensemble label."""
+    import inspect
+
+    params = inspect.signature(meets_a1_criteria).parameters
+    assert "cefr_tsar" not in params
+    assert "flesch_kincaid_grade" not in params
+    assert "gunning_fog" not in params
+    assert "spache_readability" not in params
+
+
 def test_accepts_cefr_sp_metrics_mapping():
     assert meets_a1_criteria(
         generation_valid=True,

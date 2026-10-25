@@ -110,3 +110,67 @@ class TestRunKvlBeam:
         assert result.kvl_beam_candidates_pruned == 0
         assert result.flesch_kincaid_grade == 0.0
         assert result.word_count == 0
+
+    def test_records_hit_max_tokens(self):
+        class HitMaxKvlBeam:
+            def generate_kvl_beam(
+                self, prompt, config, beam_width=4, branch_factor=10
+            ):
+                return {
+                    "response": SIMPLE_RESPONSE,
+                    "response_time_seconds": 1.5,
+                    "generation_successful": True,
+                    "kvl_beam_width": beam_width,
+                    "kvl_branch_factor": branch_factor,
+                    "kvl_beam_steps_total": 42,
+                    "kvl_beam_words_scored": 8,
+                    "kvl_beam_running_mean": 2.5,
+                    "kvl_beam_logprob_tiebreak": -1.8,
+                    "kvl_beam_candidates_pruned": 120,
+                    "hit_max_tokens": True,
+                }
+
+        config = ExperimentConfig(
+            model_name="Qwen3",
+            config_kvl_beam=True,
+            kvl_l1="es",
+            prompt_id="p03",
+        )
+        result = ExperimentPipeline().run_kvl_beam(
+            "What is a friend?",
+            config,
+            HitMaxKvlBeam(),
+            beam_width=4,
+            branch_factor=10,
+        )
+
+        assert result.generation_successful is True
+        assert result.hit_max_tokens is True
+        assert result.kvl_beam_width == 4
+
+    def test_meets_a1_false_when_cefr_sp_not_a1(self):
+        class HardCefrSpScorer:
+            def score_sentences(self, sentences):
+                return [
+                    {"label": 5, "probs": [0.0, 0.0, 0.0, 0.0, 0.0, 1.0]}
+                    for _ in sentences
+                ]
+
+        config = ExperimentConfig(
+            model_name="Qwen3",
+            config_kvl_beam=True,
+            kvl_l1="es",
+            prompt_id="p04",
+        )
+        result = ExperimentPipeline(cefr_sp_scorer=HardCefrSpScorer()).run_kvl_beam(
+            "What is a friend?",
+            config,
+            MockKvlBeamSuccessModel(),
+            beam_width=4,
+            branch_factor=10,
+        )
+
+        assert result.generation_successful is True
+        assert result.cefr_sp_level == "C2"
+        assert result.meets_a1_criteria is False
+        assert result.kvl_beam_running_mean == 2.5

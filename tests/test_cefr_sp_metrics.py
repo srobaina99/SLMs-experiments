@@ -335,6 +335,7 @@ class TestDisabledPath:
         assert result.cefr_sp_sentence_count == 0
         assert result.cefr_sp_level is None
         assert result.cefr_sp_level_ordinal is None
+        assert result.meets_a1_criteria is False
 
     def test_importing_cefr_sp_facade_in_subprocess_avoids_torch(self):
         """Fresh interpreter: façade + disabled compute must not import torch."""

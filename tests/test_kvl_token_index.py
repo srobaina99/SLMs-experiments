@@ -108,3 +108,15 @@ class TestKvlTokenIndexBuild:
         index = KvlTokenIndex.build(llm, fixture_lookup, "es")
 
         assert index.lemma_to_token_ids["friend"] == (100,)
+
+    def test_unsupported_l1_raises(self, stub_llm, fixture_lookup):
+        with pytest.raises(ValueError, match="Unsupported L1"):
+            KvlTokenIndex.build(stub_llm, fixture_lookup, "fr")
+
+    def test_es_lookup_indexes_fixture_lemmas(self, stub_llm, fixture_lookup):
+        index = KvlTokenIndex.build(stub_llm, fixture_lookup, "es")
+        lookup = fixture_lookup.load("es")
+
+        assert "friend" in lookup
+        assert "friend" in index.lemma_to_token_ids
+        assert index.lemma_to_token_ids["friend"]

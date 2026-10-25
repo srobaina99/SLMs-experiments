@@ -35,6 +35,8 @@ Environment override: set `CEFR_SP_CKPT` or pass `--cefr-sp-ckpt` / `ExperimentC
 
 Scoring is **on by default** for experiment runs. Disable with `--no-enable-cefr-sp` or `enable_cefr_sp=False`.
 
+ClusterUY Phase 2 sbatch scripts bind-mount this file (not baked into `srobaina99/slm-thesis:latest`) and **fail if it is missing**. After downloading here, rsync/scp to the cluster (file-transfer port 10022). See [docs/clusteruy.md](../../docs/clusteruy.md).
+
 ## Tokenization
 
 Training encodes **whitespace-split words** with `is_split_into_words=True` (not raw sentence strings). The façade in `evaluation/cefr_sp.py` matches that path.

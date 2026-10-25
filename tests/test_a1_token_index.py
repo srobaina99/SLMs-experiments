@@ -44,6 +44,24 @@ class TestA1TokenIndexBuild:
         assert index.id_to_words[20] == ("cat",)
         assert index.id_to_words[21] == ("cat",)
 
+    def test_weighting_ids_are_mid_union_start(self):
+        """Logit-bias weighting (llamacpp._create_logit_bias) uses mid ∪ start."""
+        llm = _make_tokenizer(
+            {
+                " hello": [10],
+                "hello": [11],
+                " cat": [20, 21],
+                "cat": [22],
+            }
+        )
+        index = A1TokenIndex.build(llm, ["hello", "cat"], use_trie=False)
+        weighting_ids = index.mid_sentence_ids | index.sentence_start_ids
+
+        assert weighting_ids == frozenset({10, 11, 20, 21, 22})
+        assert index.mid_sentence_ids <= weighting_ids
+        assert index.sentence_start_ids <= weighting_ids
+        assert index.mid_sentence_ids != index.sentence_start_ids
+
     def test_build_includes_stop_token_ids_in_both_context_sets(self):
         llm = _make_tokenizer(
             {
